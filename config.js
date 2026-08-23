@@ -31,11 +31,12 @@ export default {
 
   fixtures: {
     // Generic 4-channel RGBW decoders driving non-addressable RGBW strips.
-    // 'order' describes which output channel is wired to which color, e.g.
-    // change to 'GRBW' if your decoder maps channel 1 to green.
-    strip1: { type: 'rgbw-strip', address: 10, order: 'RGBW' },
-    strip2: { type: 'rgbw-strip', address: 20, order: 'RGBW' },
-    strip3: { type: 'rgbw-strip', address: 30, order: 'RGBW' },
+    // 'order' describes which output channel is wired to which color.
+    // The D5-E units of this rig have red/green swapped vs. their nominal
+    // layout, hence GRBW (verified on strip1, 2026-08-23).
+    strip1: { type: 'rgbw-strip', address: 10, order: 'GRBW' },
+    strip2: { type: 'rgbw-strip', address: 20, order: 'GRBW' },
+    strip3: { type: 'rgbw-strip', address: 30, order: 'GRBW' },
 
     // Cameo Phantom F5 smoke machine.
     // mode '1ch': CH1 = fog output (0-5 off, 6-255 = 1-100 %)
