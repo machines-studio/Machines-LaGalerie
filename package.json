@@ -1,0 +1,22 @@
+{
+  "name": "machines-lagalerie",
+  "version": "1.0.0",
+  "description": "Demo/test app driving RGBW strip controllers, a Varytec Hero Beam 100 and a Cameo Phantom F5 over a low-cost USB-DMX (Open DMX / FTDI) dongle",
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hemisphere-Project/Machines-LaGalerie.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "demo": "node demo.js",
+    "panel": "node panel.js",
+    "set": "node cli.js"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}

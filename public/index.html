@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La Galerie — DMX panel</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1rem; background: #16181d; color: #e6e6e6;
+    font: 15px/1.5 system-ui, sans-serif;
+  }
+  h1 { font-size: 1.15rem; margin: 0 0 1rem; font-weight: 600; }
+  h1 small { color: #8a8f98; font-weight: 400; }
+  .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .card { background: #1e2128; border: 1px solid #2c303a; border-radius: 10px; padding: 1rem; }
+  .card h2 { font-size: 0.95rem; margin: 0 0 0.75rem; display: flex; justify-content: space-between; }
+  .card h2 .addr { color: #8a8f98; font-weight: 400; }
+  .row { display: flex; align-items: center; gap: 0.6rem; margin: 0.35rem 0; }
+  .row label { width: 3.2rem; color: #aab0ba; font-size: 0.85rem; }
+  .row output { width: 3.4rem; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+  input[type=range] { flex: 1; accent-color: #4a9eff; }
+  .r input[type=range] { accent-color: #ff5252; }
+  .g input[type=range] { accent-color: #4caf50; }
+  .b input[type=range] { accent-color: #448aff; }
+  .w input[type=range] { accent-color: #eceff1; }
+  button, select {
+    background: #2a2f3a; color: #e6e6e6; border: 1px solid #3a4050;
+    border-radius: 6px; padding: 0.35rem 0.7rem; font: inherit; font-size: 0.85rem; cursor: pointer;
+  }
+  button:hover { background: #343b49; }
+  button.danger { background: #5c2323; border-color: #7a3030; }
+  button.danger:hover { background: #702c2c; }
+  .btns { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+  .swatch { width: 1.9rem; height: 1.9rem; padding: 0; border-radius: 6px; }
+  .check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; color: #aab0ba; }
+  .topbar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  input[type=number] { width: 5rem; background: #2a2f3a; color: #e6e6e6; border: 1px solid #3a4050; border-radius: 6px; padding: 0.3rem; font: inherit; }
+  .hint { color: #8a8f98; font-size: 0.8rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>La Galerie — DMX test panel <small id="status">connecting…</small></h1>
+<div class="topbar">
+  <button class="danger" onclick="post('/api/blackout', {})">BLACKOUT</button>
+  <button onclick="post('/api/beam', {home: true})">Beam home</button>
+</div>
+<div class="grid" id="grid"></div>
+
+<script>
+const $ = (sel, el = document) => el.querySelector(sel);
+const post = (url, body) =>
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .catch(() => {});
+
+// throttle per key: at most one POST per 60 ms, always sends the latest value
+const queued = {};
+const timers = {};
+function tpost(key, url, body) {
+  queued[key] = { url, body };
+  if (timers[key]) return;
+  timers[key] = setTimeout(() => {
+    delete timers[key];
+    post(queued[key].url, queued[key].body);
+  }, 60);
+}
+
+function slider(label, cls, min, max, value, oninput, fmt = (v) => v) {
+  const row = document.createElement('div');
+  row.className = 'row ' + cls;
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" value="${value}"><output>${fmt(value)}</output>`;
+  const input = $('input', row);
+  input.addEventListener('input', () => {
+    $('output', row).textContent = fmt(+input.value);
+    oninput(+input.value);
+  });
+  return row;
+}
+
+function card(title, addr) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = `<h2>${title} <span class="addr">ch ${addr}</span></h2>`;
+  document.getElementById('grid').appendChild(el);
+  return el;
+}
+
+async function init() {
+  const state = await (await fetch('/api/state')).json();
+  $('#status').textContent = 'connected';
+
+  // --- RGBW strip cards ---
+  for (const [name, def] of Object.entries(state.fixtures)) {
+    if (def.type !== 'rgbw-strip') continue;
+    const el = card(name, `${def.address}–${def.address + 3}`);
+    const vals = { r: 0, g: 0, b: 0, w: 0 };
+    const send = () => tpost(name, `/api/strip/${name}`, vals);
+    for (const c of ['r', 'g', 'b', 'w']) {
+      el.appendChild(slider(c.toUpperCase(), c, 0, 255, 0, (v) => { vals[c] = v; send(); }));
+    }
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    const presets = [['#ff0000',[255,0,0,0]], ['#00ff00',[0,255,0,0]], ['#0000ff',[0,0,255,0]],
+                     ['#ffff00',[255,255,0,0]], ['#ff00ff',[255,0,255,0]], ['#00ffff',[0,255,255,0]],
+                     ['#ffffff',[0,0,0,255]]];
+    for (const [color, [r, g, b, w]] of presets) {
+      const btn = document.createElement('button');
+      btn.className = 'swatch';
+      btn.style.background = color;
+      btn.onclick = () => {
+        Object.assign(vals, { r, g, b, w });
+        el.querySelectorAll('input[type=range]').forEach((s, i) => {
+          s.value = [r, g, b, w][i];
+          s.parentElement.querySelector('output').textContent = [r, g, b, w][i];
+        });
+        send();
+      };
+      btns.appendChild(btn);
+    }
+    const off = document.createElement('button');
+    off.textContent = 'off';
+    off.onclick = () => {
+      Object.assign(vals, { r: 0, g: 0, b: 0, w: 0 });
+      el.querySelectorAll('input[type=range]').forEach((s) => {
+        s.value = 0; s.parentElement.querySelector('output').textContent = 0;
+      });
+      send();
+    };
+    btns.appendChild(off);
+    el.appendChild(btns);
+  }
+
+  // --- Beam card ---
+  const beamDef = state.fixtures.beam;
+  if (beamDef) {
+    const el = card('beam — Hero Beam 100', `${beamDef.address}–${beamDef.address + 18}`);
+    el.appendChild(slider('pan', '', 0, 540, 270, (v) => tpost('pan', '/api/beam', { pan: v }), (v) => v + '°'));
+    el.appendChild(slider('tilt', '', 0, 250, 125, (v) => tpost('tilt', '/api/beam', { tilt: v }), (v) => v + '°'));
+    el.appendChild(slider('dimmer', '', 0, 255, 0, (v) => tpost('dim', '/api/beam', { dimmer: v })));
+    el.appendChild(slider('focus', '', 0, 255, 128, (v) => tpost('foc', '/api/beam', { focus: v })));
+
+    const rows = document.createElement('div');
+    rows.className = 'btns';
+    rows.innerHTML = `
+      <button onclick="post('/api/beam',{shutter:'open'})">shutter open</button>
+      <button onclick="post('/api/beam',{shutter:'close'})">shutter close</button>
+      <select id="beamColor">
+        ${['white','red','orange','lightblue','green','yellow','pink','blue','congo','cto7000','cto3000','salmon','purple']
+          .map((c) => `<option>${c}</option>`).join('')}
+      </select>
+      <select id="beamGobo">
+        <option value="0">gobo: open</option>
+        ${Array.from({length: 11}, (_, i) => `<option value="${i + 1}">gobo ${i + 1}</option>`).join('')}
+      </select>
+      <label class="check"><input type="checkbox" id="prismC"> prism ○</label>
+      <label class="check"><input type="checkbox" id="prismL"> prism |</label>
+      <label class="check"><input type="checkbox" id="frost"> frost</label>`;
+    el.appendChild(rows);
+    $('#beamColor').onchange = (e) => post('/api/beam', { color: e.target.value });
+    $('#beamGobo').onchange = (e) => post('/api/beam', { gobo: { index: +e.target.value } });
+    const prism = () => post('/api/beam', { prismCircular: $('#prismC').checked, prismLinear: $('#prismL').checked });
+    $('#prismC').onchange = prism;
+    $('#prismL').onchange = prism;
+    $('#frost').onchange = (e) => post('/api/beam', { frost: e.target.checked });
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Calibration: aim at a point of interest with pan/tilt, then copy the degree values into config.js (show.points).';
+    el.appendChild(hint);
+  }
+
+  // --- Smoke card ---
+  const smokeDef = state.fixtures.smoke;
+  if (smokeDef) {
+    const el = card('smoke — Phantom F5', smokeDef.address + (smokeDef.mode === '3ch' ? '–' + (smokeDef.address + 2) : ''));
+    el.appendChild(slider('output', '', 0, 100, 0, (v) => tpost('smoke', '/api/smoke', { output: v }), (v) => v + '%'));
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    btns.innerHTML = `
+      <button onclick="post('/api/smoke',{burst:{percent:60,seconds:2}})">burst 2 s @ 60%</button>
+      <button onclick="post('/api/smoke',{burst:{percent:100,seconds:5}})">burst 5 s @ 100%</button>
+      <button class="danger" onclick="post('/api/smoke',{output:0})">stop</button>`;
+    el.appendChild(btns);
+  }
+
+  // --- Raw channel card ---
+  {
+    const el = card('raw DMX channel', '1–512');
+    el.innerHTML += `
+      <div class="row">
+        <label>ch</label><input type="number" id="rawCh" min="1" max="512" value="1">
+      </div>`;
+    el.appendChild(slider('value', '', 0, 255, 0, (v) => {
+      tpost('raw', '/api/channels', { [$('#rawCh').value]: v });
+    }));
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Drives any channel directly — handy to test an unpatched device.';
+    el.appendChild(hint);
+  }
+}
+
+init().catch(() => { $('#status').textContent = 'connection failed'; });
+</script>
+</body>
+</html>
