@@ -1,1 +1,4 @@
 node_modules/
+gallery-state.json
+.offline-test/
+.DS_Store

@@ -3,11 +3,15 @@ import { OpenDmxUsb } from './open-dmx-usb.js';
 import { RgbwStrip } from './fixtures/rgbw-strip.js';
 import { HeroBeam100 } from './fixtures/hero-beam-100.js';
 import { PhantomF5 } from './fixtures/phantom-f5.js';
+import { HPlayer } from './fixtures/hplayer.js';
 
+// Each factory takes { dmx, def } (`dmx` unused by network fixtures) and
+// returns the fixture instance. `def` is the fixture's own config.js entry.
 const FIXTURE_TYPES = {
-  'rgbw-strip': (dmx, f) => new RgbwStrip(dmx, f.address, { order: f.order }),
-  'hero-beam-100': (dmx, f) => new HeroBeam100(dmx, f.address),
-  'phantom-f5': (dmx, f) => new PhantomF5(dmx, f.address, { mode: f.mode }),
+  'rgbw-strip': ({ dmx, def }) => new RgbwStrip(dmx, def.address, { order: def.order }),
+  'hero-beam-100': ({ dmx, def }) => new HeroBeam100(dmx, def.address),
+  'phantom-f5': ({ dmx, def }) => new PhantomF5(dmx, def.address, { mode: def.mode }),
+  hplayer: ({ def }) => new HPlayer(def.host, { port: def.port }),
 };
 
 /**
@@ -30,8 +34,10 @@ export async function setup() {
   for (const [name, def] of Object.entries(config.fixtures)) {
     const factory = FIXTURE_TYPES[def.type];
     if (!factory) throw new Error(`Unknown fixture type '${def.type}' for '${name}'`);
-    fixtures[name] = factory(dmx, def);
-    console.log(`[dmx] patched ${name} (${def.type}) at channel ${def.address}`);
+    fixtures[name] = factory({ dmx, def });
+    console.log(def.address !== undefined
+      ? `[dmx] patched ${name} (${def.type}) at channel ${def.address}`
+      : `[net] ${name} (${def.type}) at http://${def.host}:${def.port ?? 8080}`);
   }
 
   // Blackout, give the last frame time to go out on the wire, then close.

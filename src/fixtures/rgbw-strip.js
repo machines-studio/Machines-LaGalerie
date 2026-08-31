@@ -5,6 +5,20 @@
 //   +0 red   +1 green   +2 blue   +3 white
 // ---------------------------------------------------------------------------
 
+// Named colors shared by the show sequence (config.js `show.points[].color`)
+// and this fixture's setNamedColor(). Kept RGBW, not the beam's color-wheel
+// names (see hero-beam-100.js BEAM_COLORS) — the two fixtures pick color in
+// fundamentally different ways (mixed LEDs vs. a physical wheel).
+export const STRIP_COLORS = {
+  white: { r: 0, g: 0, b: 0, w: 255 },
+  red: { r: 255, g: 0, b: 0, w: 0 },
+  green: { r: 0, g: 255, b: 0, w: 0 },
+  blue: { r: 0, g: 0, b: 255, w: 0 },
+  yellow: { r: 255, g: 255, b: 0, w: 0 },
+  purple: { r: 255, g: 0, b: 255, w: 0 },
+  cyan: { r: 0, g: 255, b: 255, w: 0 },
+};
+
 export class RgbwStrip {
   /**
    * @param {import('../open-dmx-usb.js').OpenDmxUsb} dmx
@@ -32,6 +46,24 @@ export class RgbwStrip {
 
   setColor(r, g, b, w = 0) {
     this.set({ r, g, b, w });
+  }
+
+  /**
+   * Set the color by name (see STRIP_COLORS), optionally scaled — handy for
+   * fade in/out: setNamedColor('red', 0.5) is red at half intensity.
+   * @param {string} name  key of STRIP_COLORS, e.g. 'white', 'red', 'green'
+   * @param {number} [scale=1] intensity multiplier, 0-1
+   */
+  setNamedColor(name, scale = 1) {
+    const color = STRIP_COLORS[String(name).toLowerCase()];
+    if (!color) throw new Error(`Unknown strip color: ${name}`);
+    const k = Math.max(0, Math.min(1, scale));
+    this.setColor(
+      Math.round(color.r * k),
+      Math.round(color.g * k),
+      Math.round(color.b * k),
+      Math.round(color.w * k),
+    );
   }
 
   off() {

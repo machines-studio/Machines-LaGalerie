@@ -1,23 +1,19 @@
 // ---------------------------------------------------------------------------
 // Exhibition show sequence.
 //
-// Loops over the points of interest defined in config.js:
-//   1. SEARCH    beam wanders randomly ("searching") while the smoke machine runs
-//   2. FOCUS     smoke stops, the beam converges on the point and locks on
-//   3. REVEAL    the beam lights the point up steadily
-//   4. BEAMFADE  the beam fades to black...
-//   5. STRIPSHOW ...and the point's RGBW strip plays its animation
-//   -> next point, back to 1.
+// Walks config.js `show.timeline` — an ordered cue sheet — once per point in
+// `show.points`, looping back to the first point after the last. The
+// timeline itself is generic: to retime or reorder the show, edit
+// config.js; this file only needs to know what each *phase name* means.
 //
 // Flags:
 //   --no-smoke   never drive the smoke machine (indoor testing)
-//   --fast       run all phases at ~1/3 duration (quick testing)
+//   --fast       run every step at ~1/3 duration (quick testing)
 //
 // On startup all strips flash R/G/B/W once as a patch self-test.
 // ---------------------------------------------------------------------------
 
 import { setup, handleExit } from './src/setup.js';
-import { hsvToRgb } from './src/color.js';
 
 const args = process.argv.slice(2);
 const smokeEnabled = !args.includes('--no-smoke');
@@ -30,8 +26,8 @@ const show = config.show;
 const beam = fixtures.beam;
 const smoke = smokeEnabled ? fixtures.smoke : null;
 const points = show.points;
+const timeline = show.timeline;
 
-const dur = (name) => show[name].seconds * timeScale;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rand = (min, max) => min + Math.random() * (max - min);
 
@@ -48,59 +44,103 @@ beam.home();
 beam.setDimmer(0);
 
 // --- show state machine -----------------------------------------------------
+// Walks `timeline` for the current point; `pointIndex`/`stepIndex` are the
+// only state needed to know "where" the show is.
 let pointIndex = 0;
-let phase;
-let phaseStart;
+let stepIndex = 0;
+let stepStart;
 const pos = { pan: 270, tilt: 55 }; // beam position we are steering (degrees)
 let wander = null;                  // current random search target
 let wanderAge = 0;
-let focusFrom = null;               // position when the focus phase started
+let focusFrom = null;               // position when the focus step started
 
-function enter(next) {
-  phase = next;
-  phaseStart = Date.now();
+// The point whose color/hplayer/strip is "active" for a given step. During
+// 'search' the beam previews the UPCOMING point's color, so that step looks
+// one point ahead; every other step targets the current point.
+function targetPoint(step) {
+  if (step.phase === 'search') return points[(pointIndex + 1) % points.length];
+  return points[pointIndex];
+}
+
+function stepSeconds(step) {
+  if (step.phase === 'stripShow') return points[pointIndex].seconds + step.extraSeconds;
+  return step.seconds;
+}
+
+function enter(index) {
+  stepIndex = index;
+  stepStart = Date.now();
+  const step = timeline[stepIndex];
+  const point = targetPoint(step);
   const n = pointIndex + 1;
-  const point = points[pointIndex];
-  switch (next) {
+
+  switch (step.phase) {
     case 'search': {
       beam.shutterOpen();
-      beam.setColor(show.reveal.color);
-      const smokeSec = Math.min(show.search.smokeSeconds, show.search.seconds) * timeScale;
-      if (smoke) smoke.burst(show.search.smokePercent, smokeSec);
-      console.log(`[show] point ${n}: searching...` +
-        (smoke ? ` (smoke ${show.search.smokePercent}% for ${smokeSec.toFixed(1)} s)` : ''));
+      beam.setColor(point.color);
+      const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
+      if (smoke) smoke.burst(step.smokePercent, smokeSec);
+      const nextN = (pointIndex + 1) % points.length + 1;
+      console.log(`[show] point ${n}: searching for point ${nextN} (${point.color})...` +
+        (smoke ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : ''));
       break;
     }
     case 'focus':
       if (smoke) smoke.off();
       focusFrom = { ...pos };
-      console.log(`[show] point ${n}: ${smoke ? 'smoke off, ' : ''}locking onto (pan ${point.pan}°, tilt ${point.tilt}°)`);
+      console.log(`[show] point ${n}: locking onto (pan ${point.pan}°, tilt ${point.tilt}°)`);
       break;
     case 'reveal':
       beam.setPosition(point.pan, point.tilt);
       beam.setDimmer(255);
-      console.log(`[show] point ${n}: revealed`);
+      console.log(`[show] point ${n}: revealed (${point.color})`);
       break;
     case 'beamFade':
       console.log(`[show] point ${n}: beam fading out`);
       break;
-    case 'stripShow':
+    case 'stripShow': {
       beam.shutterClose();
-      console.log(`[show] point ${n}: RGBW animation on '${point.strip}'`);
+      beam.setDimmer(0);
+      const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
+      if (hplayer) {
+        hplayer.trig(1).catch((err) =>
+          console.error(`[show] ${point.hplayer} trig failed: ${err.message}`));
+      }
+      console.log(`[show] point ${n}: strip '${point.strip}' fading in (${point.color})` +
+        (hplayer ? ` + ${point.hplayer} trig` : ''));
       break;
+    }
+    case 'gap':
+      fixtures[point.strip].off();
+      console.log(`[show] point ${n}: gap`);
+      break;
+    default:
+      console.warn(`[show] unknown timeline phase '${step.phase}', skipping`);
+      enter((stepIndex + 1) % timeline.length);
+  }
+}
+
+function advance() {
+  const nextStep = stepIndex + 1;
+  if (nextStep < timeline.length) {
+    enter(nextStep);
+  } else {
+    pointIndex = (pointIndex + 1) % points.length;
+    enter(0);
   }
 }
 
 function tick() {
-  const t = (Date.now() - phaseStart) / 1000;
-  const point = points[pointIndex];
+  const step = timeline[stepIndex];
+  const t = (Date.now() - stepStart) / 1000;
+  const dur = stepSeconds(step) * timeScale;
+  const point = targetPoint(step);
 
-  switch (phase) {
+  switch (step.phase) {
     case 'search': {
-      const s = show.search;
       const reached = wander && Math.hypot(wander.pan - pos.pan, wander.tilt - pos.tilt) < 5;
       if (!wander || reached || ++wanderAge > config.refreshRate * 1.5) {
-        wander = { pan: rand(s.panMin, s.panMax), tilt: rand(s.tiltMin, s.tiltMax) };
+        wander = { pan: rand(step.panMin, step.panMax), tilt: rand(step.tiltMin, step.tiltMax) };
         wanderAge = 0;
       }
       // exponential drift toward the target: fast start, organic slowdown
@@ -108,64 +148,60 @@ function tick() {
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
       beam.setDimmer(255);
-      if (t >= dur('search')) enter('focus');
+      if (t >= dur) advance();
       break;
     }
 
     case 'focus': {
-      const k = Math.min(1, t / dur('focus'));
+      const k = Math.min(1, t / dur);
       const ease = 1 - (1 - k) ** 3; // cubic ease-out
       const wobble = Math.sin(k * Math.PI * 4) * (1 - k) * 8; // decaying "almost got it" oscillation
       pos.pan = focusFrom.pan + (point.pan - focusFrom.pan) * ease + wobble;
       pos.tilt = focusFrom.tilt + (point.tilt - focusFrom.tilt) * ease + wobble * 0.4;
       beam.setPosition(pos.pan, pos.tilt);
-      if (k >= 1) enter('reveal');
+      if (k >= 1) advance();
       break;
     }
 
     case 'reveal': {
-      if (t >= dur('reveal')) enter('beamFade');
+      if (t >= dur) advance();
       break;
     }
 
     case 'beamFade': {
-      const k = Math.min(1, t / dur('beamFade'));
+      const k = Math.min(1, t / dur);
       beam.setDimmer(Math.round(255 * (1 - k)));
-      if (k >= 1) enter('stripShow');
+      if (k >= 1) advance();
       break;
     }
 
     case 'stripShow': {
       const strip = fixtures[point.strip];
-      const f = Math.min(1, t / dur('stripShow'));
-      if (f < 0.3) {
-        // solid primaries: red, green, blue
-        const step = Math.min(2, Math.floor((f / 0.3) * 3));
-        const [r, g, b] = [[255, 0, 0], [0, 255, 0], [0, 0, 255]][step];
-        strip.setColor(r, g, b, 0);
-      } else if (f < 0.7) {
-        // rainbow sweep, two full hue cycles
-        const { r, g, b } = hsvToRgb(((f - 0.3) / 0.4) * 2, 1, 1);
-        strip.setColor(r, g, b, 0);
-      } else if (f < 0.95) {
-        // white channel breathing
-        const breathe = 0.5 - 0.5 * Math.cos(((f - 0.7) / 0.25) * Math.PI * 4);
-        strip.setColor(0, 0, 0, Math.round(40 + 215 * breathe));
-      } else {
-        // fade to black
-        strip.setColor(0, 0, 0, Math.round(40 * (1 - (f - 0.95) / 0.05)));
-      }
-      if (f >= 1) {
+      const fadeSeconds = 1.5 * timeScale; // fade in/out edges of the hold
+      const k = Math.min(1, t / dur);
+      let scale;
+      if (t < fadeSeconds) scale = t / fadeSeconds;               // fade in
+      else if (dur - t < fadeSeconds) scale = (dur - t) / fadeSeconds; // fade out
+      else scale = 1;                                             // steady hold
+      strip.setNamedColor(point.color, Math.max(0, Math.min(1, scale)));
+      if (k >= 1) {
         strip.off();
-        pointIndex = (pointIndex + 1) % points.length;
-        enter('search');
+        advance();
       }
       break;
     }
+
+    case 'gap': {
+      if (t >= dur) advance();
+      break;
+    }
+
+    default:
+      advance();
   }
 }
 
-console.log(`[show] starting loop over ${points.length} points` +
+console.log(`[show] starting loop over ${points.length} points, ${timeline.length} steps each` +
   (smokeEnabled ? '' : ' (smoke disabled)') + (timeScale !== 1 ? ' (fast mode)' : ''));
-enter('search');
+enter(0);
 setInterval(tick, 1000 / config.refreshRate);

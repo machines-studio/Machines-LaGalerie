@@ -49,41 +49,85 @@ export default {
     // (MODE -> DMX mode -> 19CH); the 6-channel mode has no direct
     // color/gobo control so this app uses the 19-channel layout.
     beam: { type: 'hero-beam-100', address: 100 },
+
+    // HPlayer2 video players (RastaOS, Machines expo 2026). Not DMX: each
+    // is a standalone Raspberry Pi on the gallery WiFi (SSID 'Machines'),
+    // controlled over plain HTTP (no `address` — networked, not patched).
+    // See https://37m.gr/misc/RastaOS-7.2-Machines26-guide.html
+    //
+    // *** PLACEHOLDER IPs — replace with the real addresses once on site
+    // *** (check the WiFi router's DHCP leases, or each player's own display).
+    hplayer1: { type: 'hplayer', host: '10.0.0.101' },
+    hplayer2: { type: 'hplayer', host: '10.0.0.102' },
+    hplayer3: { type: 'hplayer', host: '10.0.0.103' },
   },
 
   // -------------------------------------------------------------------------
-  // Exhibition show sequence (demo.js):
-  //   search -> beam finds point N -> beam fades out -> strip N animates -> next point
+  // Exhibition show sequence (demo.js and gallery.js both run this).
+  //
+  // `show.timeline` is the sequence of phases run for ONE point, top to
+  // bottom, in the exact order they play — read it like a cue sheet. Once
+  // the last step finishes, the runner moves to the next point in
+  // `show.points` and replays the same timeline from the top; after the
+  // last point it loops back to the first.
+  //
+  // Each step is `{ phase, seconds, ...params }`. `seconds` is that step's
+  // own duration — change one number to retime one step, nothing else
+  // needs touching. A step with no `seconds` (stripShow) instead derives
+  // its hold time from the current point (see below).
+  // `--fast` (both demo.js and gallery.js) scales every `seconds` by 0.3
+  // for quick tests.
   // -------------------------------------------------------------------------
   show: {
-    // The three points of interest: which strip lights up there, and where the
-    // beam must aim (degrees: pan 0-540, tilt 0-250). Calibrate on site with
-    // the web panel (npm run panel) — aim with the sliders, copy the values.
+    // The three points of interest: which strip/hplayer live there, the
+    // color used for the search/focus/reveal beam AND the strip fade-in
+    // (see STRIP_COLORS in src/fixtures/rgbw-strip.js and BEAM_COLORS in
+    // src/fixtures/hero-beam-100.js — must be a name valid in both), where
+    // the beam must aim (degrees: pan 0-540, tilt 0-250), and how long that
+    // point's hplayer video runs.
+    //   seconds  the hplayer video's own runtime — keep this matched to the
+    //            actual length of that point's triggered clip, it's the
+    //            single source of truth for "how long is the video" and
+    //            drives the timeline's 'stripShow' step below.
+    // Calibrate pan/tilt on site with the web panel (npm run panel) — aim
+    // with the sliders, copy the values here.
     points: [
-      { strip: 'strip1', pan: 200, tilt: 60 },
-      { strip: 'strip2', pan: 270, tilt: 45 },
-      { strip: 'strip3', pan: 340, tilt: 65 },
+      { strip: 'strip1', hplayer: 'hplayer1', color: 'white', pan: 200, tilt: 60, seconds: 90 },
+      { strip: 'strip2', hplayer: 'hplayer2', color: 'red', pan: 270, tilt: 45, seconds: 90 },
+      { strip: 'strip3', hplayer: 'hplayer3', color: 'green', pan: 340, tilt: 65, seconds: 90 },
     ],
 
-    // Phase 1 — beam wanders "searching" inside this pan/tilt window while
-    // the smoke machine runs. Smoke runs for smokeSeconds at the start of the
-    // phase (capped by the phase itself), so the cloud can settle before the
-    // reveal.
-    search: {
-      seconds: 12,
-      smokePercent: 50,
-      smokeSeconds: 6,
-      panMin: 160, panMax: 380, tiltMin: 20, tiltMax: 90,
-    },
+    // The cue sheet — one full pass, per point, in order:
+    timeline: [
+      // 1. beam wanders inside the pan/tilt window below, colored for the
+      //    point about to be found, while the smoke machine runs briefly:
+      //    smoke fires for smokeSeconds then stops on its own (capped by
+      //    this step's `seconds`) — it does not run for the whole step.
+      {
+        phase: 'search', seconds: 12,
+        smokePercent: 50, smokeSeconds: 6,
+        panMin: 160, panMax: 380, tiltMin: 20, tiltMax: 90,
+      },
 
-    // Phase 2 — smoke stops, beam locks onto the point...
-    focus: { seconds: 3 },
+      // 2. smoke stops (if still running), beam converges onto the point's
+      //    pan/tilt (still that point's color).
+      { phase: 'focus', seconds: 3 },
 
-    // ...and lights it up steadily.
-    reveal: { seconds: 5, color: 'white' },
+      // 3. beam holds steady on the point before fading out.
+      { phase: 'reveal', seconds: 3 },
 
-    // Phase 3 — beam fades to black, then the point's strip animates.
-    beamFade: { seconds: 2 },
-    stripShow: { seconds: 20 },
+      // 4. beam fades to black. Only once this completes do the strip and
+      //    hplayer start (sequential, no overlap).
+      { phase: 'beamFade', seconds: 2 },
+
+      // 5. strip fades in (point color) + hplayer trig fires, together.
+      //    Holds for the point's video length (points[].seconds) plus this
+      //    artist-tunable buffer, then the strip fades out. No `seconds`
+      //    here on purpose — total hold time is points[].seconds + extraSeconds.
+      { phase: 'stripShow', extraSeconds: 5 },
+
+      // 6. everything off for a beat before the next point begins.
+      { phase: 'gap', seconds: 5 },
+    ],
   },
 };

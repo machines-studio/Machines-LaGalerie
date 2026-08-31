@@ -13,6 +13,7 @@
   },
   "scripts": {
     "demo": "node demo.js",
+    "gallery": "node gallery.js",
     "panel": "node panel.js",
     "set": "node cli.js"
   },

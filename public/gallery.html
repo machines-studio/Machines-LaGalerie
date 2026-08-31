@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La Galerie — show control</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.25rem; background: #16181d; color: #e6e6e6;
+    font: 16px/1.5 system-ui, sans-serif;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 1.25rem; font-weight: 600; }
+  h1 small { color: #8a8f98; font-weight: 400; display: block; font-size: 0.85rem; margin-top: 0.2rem; }
+  .card {
+    background: #1e2128; border: 1px solid #2c303a; border-radius: 12px;
+    padding: 1.1rem; margin-bottom: 1rem;
+  }
+  .card h2 { font-size: 1rem; margin: 0 0 0.9rem; }
+  .points { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .point {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    background: #23262e; border: 1px solid #2c303a; border-radius: 10px; padding: 0.8rem 1rem;
+  }
+  .point.active { border-color: var(--dot); box-shadow: 0 0 0 1px var(--dot); }
+  .point .info { display: flex; align-items: center; gap: 0.6rem; }
+  .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--dot); flex: none; }
+  .point .name { font-weight: 500; }
+  .point .sub { color: #8a8f98; font-size: 0.8rem; }
+  button {
+    background: #2a2f3a; color: #e6e6e6; border: 1px solid #3a4050;
+    border-radius: 8px; padding: 0.6rem 1rem; font: inherit; font-size: 0.9rem;
+    cursor: pointer; touch-action: manipulation;
+  }
+  button:hover { background: #343b49; }
+  button:active { background: #3d465a; }
+  button.primary { background: #2b5a9e; border-color: #3a6fbd; }
+  button.primary:hover { background: #326aba; }
+  .row { display: flex; align-items: center; gap: 0.9rem; }
+  .row output { min-width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; accent-color: #4a9eff; height: 1.6rem; }
+  .toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.2rem 0;
+  }
+  .switch {
+    position: relative; width: 3.4rem; height: 1.9rem; border-radius: 999px;
+    background: #3a4050; border: none; cursor: pointer; flex: none;
+  }
+  .switch::after {
+    content: ''; position: absolute; top: 0.2rem; left: 0.2rem;
+    width: 1.5rem; height: 1.5rem; border-radius: 50%; background: #e6e6e6;
+    transition: transform 0.15s ease;
+  }
+  .switch.on { background: #2b8a4e; }
+  .switch.on::after { transform: translateX(1.5rem); }
+  #status { color: #8a8f98; font-size: 0.85rem; }
+  .hint { color: #666c78; font-size: 0.78rem; margin-top: 0.6rem; }
+</style>
+</head>
+<body>
+<h1>La Galerie — show control <small id="status">connecting…</small></h1>
+
+<div class="card">
+  <h2>Points</h2>
+  <div class="points" id="points"></div>
+  <div class="hint">"Focus" jumps straight to that point's video, cutting whatever is currently playing.</div>
+</div>
+
+<div class="card">
+  <h2>Volume</h2>
+  <div class="row">
+    <button id="muteBtn">🔇</button>
+    <input type="range" id="volume" min="0" max="100" value="80">
+    <output id="volumeOut">80</output>
+  </div>
+  <div class="hint">Applies to all three video players.</div>
+</div>
+
+<div class="card">
+  <h2>Fog machine</h2>
+  <div class="toggle">
+    <span>Enabled during search</span>
+    <button class="switch" id="fogToggle"></button>
+  </div>
+</div>
+
+<script>
+const $ = (sel, el = document) => el.querySelector(sel);
+const post = (url, body) =>
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((r) => r.json()).catch(() => ({ ok: false }));
+
+const POINT_COLORS = { white: '#eceff1', red: '#ff5252', green: '#4caf50', blue: '#448aff', yellow: '#ffca28', purple: '#ab47bc', cyan: '#26c6da' };
+
+let lastVolume = 80;
+
+async function refresh() {
+  const state = await (await fetch('/api/state')).json();
+  $('#status').textContent = 'connected';
+
+  const container = $('#points');
+  container.innerHTML = '';
+  state.points.forEach((p) => {
+    const el = document.createElement('div');
+    el.className = 'point' + (p.index === state.current.pointIndex ? ' active' : '');
+    el.style.setProperty('--dot', POINT_COLORS[p.color] || '#8a8f98');
+    el.innerHTML = `
+      <div class="info">
+        <span class="dot"></span>
+        <div>
+          <div class="name">Point ${p.index + 1}</div>
+          <div class="sub">${p.strip}${p.hplayer ? ' + ' + p.hplayer : ''}</div>
+        </div>
+      </div>
+      <button class="primary">Focus</button>`;
+    $('button', el).onclick = () => post('/api/focus', { point: p.index });
+    container.appendChild(el);
+  });
+
+  const vol = $('#volume');
+  if (document.activeElement !== vol) {
+    vol.value = state.volume;
+    $('#volumeOut').textContent = state.volume;
+  }
+  if (state.volume > 0) lastVolume = state.volume;
+
+  const fog = $('#fogToggle');
+  fog.classList.toggle('on', state.smokeEnabled);
+}
+
+$('#volume').addEventListener('input', (e) => {
+  $('#volumeOut').textContent = e.target.value;
+});
+$('#volume').addEventListener('change', (e) => {
+  post('/api/volume', { volume: +e.target.value });
+});
+$('#muteBtn').onclick = async () => {
+  const vol = $('#volume');
+  if (+vol.value > 0) {
+    lastVolume = +vol.value;
+    vol.value = 0;
+  } else {
+    vol.value = lastVolume || 80;
+  }
+  $('#volumeOut').textContent = vol.value;
+  await post('/api/volume', { volume: +vol.value });
+};
+
+$('#fogToggle').onclick = async () => {
+  const on = $('#fogToggle').classList.contains('on');
+  await post('/api/fog', { enabled: !on });
+  refresh();
+};
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
