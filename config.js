@@ -170,7 +170,7 @@ export default {
       //    whole step.
       {
         phase: 'disco', seconds: 12,
-        smokePercent: 20, smokeSeconds: 3,
+        smokePercent: 5, smokeSeconds: 15,
         panMin: 0, panMax: 380, tiltMin: 90, tiltMax: 125,
       },
 
@@ -193,10 +193,17 @@ export default {
       //    buffer, then the strip fades out. No `seconds` here on purpose —
       //    total hold time is startDelaySeconds + points[].video.seconds +
       //    extraSeconds.
-      { phase: 'video', startDelaySeconds: 3, extraSeconds: 5 },
+      { phase: 'video', startDelaySeconds: 3, extraSeconds: 10 },
 
       // 6. everything off for a beat before the next point begins.
       { phase: 'gap', seconds: 5 },
     ],
+
+    // Extra gap held once per full loop — after the last point's own 'gap'
+    // above, before wrapping back to the first point — not between every
+    // point (that's what timeline's 'gap' is for). Everything is already
+    // off at this point; this just holds the silence/blackout a beat
+    // longer before the show starts over.
+    loopGapSeconds: 10,
   },
 };

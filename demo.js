@@ -71,6 +71,11 @@ let focusFrom = null;               // position when the focus step started
 let videoStarted = false;           // one-shot: has the current 'video' step's hplayer been trig'd yet
 let videoStopped = false;           // one-shot: has the current 'video' step's hplayer been stopped yet
 let soundStopped = false;           // one-shot: has the current 'disco' step's sound hplayer been stopped yet
+// Held once per full loop, after the last point's own 'gap' and before
+// wrapping back to the first point — see advance()/tick(). Not part of
+// `timeline` (that's per-point), so it's tracked as its own flag rather
+// than a stepIndex/phase value.
+let inLoopGap = false;
 
 // The point whose color/hplayer/strip is "active" for a given step. Every
 // step in a pass — including 'disco' — targets the same current point:
@@ -179,13 +184,37 @@ function advance() {
   const nextStep = stepIndex + 1;
   if (nextStep < timeline.length) {
     enter(nextStep);
-  } else {
-    pointIndex = (pointIndex + 1) % points.length;
-    enter(0);
+    return;
   }
+
+  // Last step of the current point just finished. Wrapping from the last
+  // point back to the first is the one transition that gets an extra
+  // "between loops" gap on top of that point's own 'gap' — every other
+  // point-to-point transition just moves on immediately.
+  const wrapping = pointIndex === points.length - 1;
+  const loopGapSeconds = show.loopGapSeconds ?? 0;
+  if (wrapping && loopGapSeconds > 0) {
+    inLoopGap = true;
+    stepStart = Date.now();
+    console.log(`[show] loop gap (${loopGapSeconds}s) before starting over`);
+    return;
+  }
+
+  pointIndex = (pointIndex + 1) % points.length;
+  enter(0);
 }
 
 function tick() {
+  if (inLoopGap) {
+    const loopGapSeconds = show.loopGapSeconds ?? 0;
+    if ((Date.now() - stepStart) / 1000 >= loopGapSeconds * timeScale) {
+      inLoopGap = false;
+      pointIndex = 0;
+      enter(0);
+    }
+    return;
+  }
+
   const step = timeline[stepIndex];
   const t = (Date.now() - stepStart) / 1000;
   const dur = stepSeconds(step) * timeScale;

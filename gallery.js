@@ -162,6 +162,11 @@ let pausedAt = null; // Date.now() when paused; used to shift stepStart on resum
 let videoStarted = false; // one-shot: has the current 'video' step's hplayer been trig'd yet
 let videoStopped = false; // one-shot: has the current 'video' step's hplayer been stopped yet
 let soundStopped = false; // one-shot: has the current 'disco' step's sound hplayer been stopped yet
+// Held once per full loop, after the last point's own 'gap' and before
+// wrapping back to the first point — see advance()/tick(). Not part of
+// `timeline` (that's per-point), so it's tracked as its own flag rather
+// than a stepIndex/phase value.
+let inLoopGap = false;
 
 // Index of the timeline's 'disco' step — resolved once so a "goto focus"
 // request can jump straight to it, for the requested point.
@@ -200,6 +205,7 @@ function stepSeconds(step) {
 // pre-roll), its own hplayer during 'video'. Used by play/pause to
 // pause/resume the right player.
 function activeHplayer() {
+  if (inLoopGap) return null; // everything already off, nothing to pause/resume
   const step = timeline[stepIndex];
   const point = points[pointIndex];
   if (step.phase === 'disco' && point.sound) return fixtures[point.sound.hplayer];
@@ -300,6 +306,7 @@ function advance() {
   if (focusRequest !== null) {
     const requested = focusRequest;
     focusRequest = null;
+    inLoopGap = false; // a focus jump also cuts short a between-loops gap
     for (const p of points) {
       const hplayer = p.hplayer ? fixtures[p.hplayer] : null;
       if (hplayer) hplayer.stop().catch(() => {});
@@ -320,10 +327,24 @@ function advance() {
   const nextStep = stepIndex + 1;
   if (nextStep < timeline.length) {
     enter(nextStep);
-  } else {
-    pointIndex = (pointIndex + 1) % points.length;
-    enter(0);
+    return;
   }
+
+  // Last step of the current point just finished. Wrapping from the last
+  // point back to the first is the one transition that gets an extra
+  // "between loops" gap on top of that point's own 'gap' — every other
+  // point-to-point transition just moves on immediately.
+  const wrapping = pointIndex === points.length - 1;
+  const loopGapSeconds = show.loopGapSeconds ?? 0;
+  if (wrapping && loopGapSeconds > 0) {
+    inLoopGap = true;
+    stepStart = Date.now();
+    console.log(`[gallery] loop gap (${loopGapSeconds}s) before starting over`);
+    return;
+  }
+
+  pointIndex = (pointIndex + 1) % points.length;
+  enter(0);
 }
 
 // Global play/pause. Pausing freezes the timeline (tick() becomes a no-op,
@@ -370,18 +391,29 @@ async function setPaused(next) {
 function tick() {
   if (paused) return; // frozen — beam/smoke/strip hold, hplayer already paused via /api/pause
 
+  // A focus request can interrupt mid-step, not just at step boundaries —
+  // otherwise a 90 s video step (or this loop gap) would ignore the button
+  // until it naturally ends. Only skip if we're not already exactly where
+  // it wants us.
+  if (focusRequest !== null && !(!inLoopGap && stepIndex === discoIndex && pointIndex === focusRequest)) {
+    advance();
+    return;
+  }
+
+  if (inLoopGap) {
+    const loopGapSeconds = show.loopGapSeconds ?? 0;
+    if ((Date.now() - stepStart) / 1000 >= loopGapSeconds * timeScale) {
+      inLoopGap = false;
+      pointIndex = 0;
+      enter(0);
+    }
+    return;
+  }
+
   const step = timeline[stepIndex];
   const t = (Date.now() - stepStart) / 1000;
   const dur = stepSeconds(step) * timeScale;
   const point = targetPoint(step);
-
-  // A focus request can also interrupt mid-step, not just at step
-  // boundaries — otherwise a 90 s video step would ignore the button for
-  // up to 90 s. Only skip if we're not already exactly where it wants us.
-  if (focusRequest !== null && !(stepIndex === discoIndex && pointIndex === focusRequest)) {
-    advance();
-    return;
-  }
 
   switch (step.phase) {
     case 'disco': {
@@ -518,7 +550,7 @@ const server = http.createServer(async (req, res) => {
           hplayer: p.hplayer,
           color: p.color,
         })),
-        current: { pointIndex, phase: timeline[stepIndex].phase },
+        current: { pointIndex, phase: inLoopGap ? 'loopGap' : timeline[stepIndex].phase },
         volume: state.volume,
         smokeEnabled: state.smokeEnabled,
         discoSpeedupSeconds: state.discoSpeedupSeconds,
