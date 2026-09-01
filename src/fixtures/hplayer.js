@@ -5,9 +5,9 @@
 // it's a standalone Raspberry Pi reachable over the gallery WiFi, controlled
 // with plain HTTP GET requests.
 //
-//   GET http://<ip>:8080/trig/<n>   play sequence n_*.mp4 once, then loop
+//   GET http://<ip>:8080/trig/<n>   play sequence n_* once, then loop
 //   GET http://<ip>:8080/play/<f>   play a specific file once
-//   GET http://<ip>:8080/stop       back to idle loop (0_*.mp4)
+//   GET http://<ip>:8080/stop       back to idle loop (0_*)
 //   GET http://<ip>:8080/pause
 //   GET http://<ip>:8080/resume
 //   GET http://<ip>:8080/volume/<0-100>
@@ -15,6 +15,16 @@
 //   GET http://<ip>:8080/unmute
 //   GET http://<ip>:8080/status
 //   GET http://<ip>:8080/ping
+//
+// SD card file naming (RastaOS convention, confirmed against the guide
+// below): `N_xxxx.ext` — N a single digit, not zero-padded, underscore
+// separator. `0_xxxx` is the idle loop (plays on boot and between
+// sequences); `1_xxxx`, `2_xxxx`, etc. answer `/trig/1`, `/trig/2`, etc.
+// `.mp4` (H.264, 1080p max, AAC audio) is the main format; `.mp3`/`.wav`
+// audio and `.jpg`/`.png` images work too, under that same N_ numbering —
+// a video and an audio file on the *same* player must not share N, or
+// /trig/N is ambiguous between them. Several files sharing one N play back
+// to back, alphabetically.
 //
 // Reference: https://37m.gr/misc/RastaOS-7.2-Machines26-guide.html
 //

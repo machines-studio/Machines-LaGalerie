@@ -88,21 +88,29 @@ export default {
     // the beam must aim (degrees: pan 0-540, tilt 0-250), and its video.
     //   video    { file, seconds } for the timeline's 'video' step.
     //            `file` is passed straight to hplayer.trig(file) — matches
-    //            the N in that player's N_*.mp4; defaults to 1 if omitted,
-    //            so only needs setting when a player has more than one clip
-    //            (e.g. its video AND a sound file living on the same
-    //            hplayer). `seconds` is that clip's own runtime — keep it
-    //            matched to the actual length of the triggered file, it's
-    //            the single source of truth for "how long is the video" and
-    //            drives the 'video' step's hold time.
+    //            the N in that player's N_xxxx.mp4 on its SD card (RastaOS
+    //            convention: single digit, not zero-padded, underscore
+    //            separator — 0_ is reserved for the idle loop, see
+    //            src/fixtures/hplayer.js); defaults to 1 if omitted, so only
+    //            needs setting when a player hosts more than one clip (e.g.
+    //            its video AND a point's sound file living on the same
+    //            hplayer — give them distinct numbers, /trig/N is ambiguous
+    //            if two files share N on the same player). `seconds` is that
+    //            clip's own runtime — keep it matched to the actual length of
+    //            the triggered file, it's the single source of truth for
+    //            "how long is the video" and drives the 'video' step's hold
+    //            time.
     //   sound    optional pre-roll played on the timeline's 'sound' step,
     //            right after the beam fades and before the video starts:
     //            { hplayer, file, seconds }, same shape as `video` above
-    //            plus its own `hplayer` (may differ from the point's own,
-    //            e.g. routed to a center speaker). `seconds` is how long the
-    //            sound step holds (should match that clip's length). Omit
-    //            the whole field to skip the sound step for that point (it
-    //            becomes an instant no-op).
+    //            (file N -> that player's N_xxxx.mp3/.wav — same N_ numbering
+    //            as video, just a different extension) plus its own
+    //            `hplayer` (may differ from the point's own, e.g. routed to a
+    //            center speaker — remember its file numbers share that
+    //            player's numbering space with any video living there too).
+    //            `seconds` is how long the sound step holds (should match
+    //            that clip's length). Omit the whole field to skip the sound
+    //            step for that point (it becomes an instant no-op).
     // Calibrate pan/tilt on site with the web panel (npm run panel) — aim
     // with the sliders, copy the values here.
     points: [
@@ -110,28 +118,31 @@ export default {
         strip: 'strip1',
         hplayer: 'hplayer1',
         color: 'white',
-        pan: 200,
-        tilt: 60,
+        pan: 270,
+        tilt: 44,
         video: { file: 1, seconds: 90 },
-        sound: { hplayer: 'hplayer2', file: 1, seconds: 8 },
+        sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
       },
       {
         strip: 'strip2',
         hplayer: 'hplayer2',
         color: 'red',
-        pan: 270,
-        tilt: 45,
+        pan: 179,
+        tilt: 71,
+        // hplayer2 also hosts every point's sound pre-roll (files 2-4 below)
+        // — keep this point's video file number (1) distinct from those, or
+        // /trig/N is ambiguous between the video and a sound clip.
         video: { file: 1, seconds: 90 },
-        sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
+        sound: { hplayer: 'hplayer2', file: 3, seconds: 8 },
       },
       {
         strip: 'strip3',
         hplayer: 'hplayer3',
         color: 'green',
-        pan: 340,
-        tilt: 65,
+        pan: 88,
+        tilt: 42,
         video: { file: 1, seconds: 90 },
-        sound: { hplayer: 'hplayer2', file: 3, seconds: 8 },
+        sound: { hplayer: 'hplayer2', file: 4, seconds: 8 },
       },
     ],
 
@@ -144,7 +155,7 @@ export default {
       {
         phase: 'search', seconds: 12,
         smokePercent: 50, smokeSeconds: 6,
-        panMin: 160, panMax: 380, tiltMin: 20, tiltMax: 90,
+        panMin: 0, panMax: 380, tiltMin: 90, tiltMax: 125,
       },
 
       // 2. smoke stops (if still running), beam converges onto the point's
