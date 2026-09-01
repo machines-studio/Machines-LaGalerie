@@ -299,6 +299,11 @@ function advance() {
       if (hplayer) hplayer.stop().catch(() => {});
       const soundHplayer = p.sound ? fixtures[p.sound.hplayer] : null;
       if (soundHplayer) soundHplayer.stop().catch(() => {});
+      // Only 'gap' ever turns a strip off — if this cut interrupts whatever
+      // point was mid-'video' (or anywhere before its own 'gap'), that
+      // strip would otherwise stay lit indefinitely once the show jumps
+      // away from it.
+      fixtures[p.strip].off();
     }
     pointIndex = requested;
     wander = null; // start the wander fresh toward the new point's window
