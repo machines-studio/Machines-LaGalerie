@@ -32,11 +32,12 @@ export default {
   fixtures: {
     // Generic 4-channel RGBW decoders driving non-addressable RGBW strips.
     // 'order' describes which output channel is wired to which color.
-    // The D5-E units of this rig have red/green swapped vs. their nominal
-    // layout, hence GRBW (verified on strip1, 2026-08-23).
-    strip1: { type: 'rgbw-strip', address: 10, order: 'GRBW' },
-    strip2: { type: 'rgbw-strip', address: 20, order: 'GRBW' },
-    strip3: { type: 'rgbw-strip', address: 30, order: 'GRBW' },
+    // The D5-E units of this rig wire straight to their nominal layout,
+    // hence RGBW (re-verified on strip1, 2026-09-01 — an earlier check on
+    // 2026-08-23 had found red/green swapped, but that no longer holds).
+    strip1: { type: 'rgbw-strip', address: 10, order: 'RGBW' },
+    strip2: { type: 'rgbw-strip', address: 20, order: 'RGBW' },
+    strip3: { type: 'rgbw-strip', address: 30, order: 'RGBW' },
 
     // Cameo Phantom F5 smoke machine.
     // mode '1ch': CH1 = fog output (0-5 off, 6-255 = 1-100 %)
@@ -55,11 +56,12 @@ export default {
     // controlled over plain HTTP (no `address` — networked, not patched).
     // See https://37m.gr/misc/RastaOS-7.2-Machines26-guide.html
     //
-    // *** PLACEHOLDER IPs — replace with the real addresses once on site
-    // *** (check the WiFi router's DHCP leases, or each player's own display).
-    hplayer1: { type: 'hplayer', host: '10.0.0.101' },
-    hplayer2: { type: 'hplayer', host: '10.0.0.102' },
-    hplayer3: { type: 'hplayer', host: '10.0.0.103' },
+    // Confirmed on-site addresses (2026-09-01, via the WiFi router's DHCP
+    // leases). Re-check here if a player gets swapped or the router reboots
+    // with a different lease table.
+    hplayer1: { type: 'hplayer', host: '192.168.1.11' },
+    hplayer2: { type: 'hplayer', host: '192.168.1.12' },
+    hplayer3: { type: 'hplayer', host: '192.168.1.13' },
   },
 
   // -------------------------------------------------------------------------
