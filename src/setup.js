@@ -71,13 +71,19 @@ export async function setup() {
  * @param {object} fixtures  the `fixtures` map returned by setup()
  * @param {object} [options]
  * @param {number} [options.intervalMs=2000] delay between retry rounds
+ * @param {(pending: Set<string>) => void} [options.onUpdate] called once
+ *   before the first ping round and again after every round, with the
+ *   current set of hplayer fixture names still not answering — lets a
+ *   caller reflect live connection status (e.g. blinking a strip per
+ *   hplayer) without this module needing to know about strips/points.
  */
-export async function waitForHplayers(fixtures, { intervalMs = 2000 } = {}) {
+export async function waitForHplayers(fixtures, { intervalMs = 2000, onUpdate } = {}) {
   const players = Object.entries(fixtures).filter(([, f]) => f instanceof HPlayer);
   if (players.length === 0) return;
 
   const pending = new Map(players); // name -> fixture, shrinks as players come up
   console.log(`[boot] waiting for ${pending.size} hplayer(s) to come online...`);
+  onUpdate?.(new Set(pending.keys()));
 
   let round = 0;
   while (pending.size > 0) {
@@ -87,6 +93,7 @@ export async function waitForHplayers(fixtures, { intervalMs = 2000 } = {}) {
         pending.delete(name);
       }).catch(() => {}), // still not up — stays in `pending`, retried next round
     ));
+    onUpdate?.(new Set(pending.keys()));
     if (pending.size === 0) break;
     round += 1;
     if (round % 15 === 0) { // ~every 30s at the default interval
