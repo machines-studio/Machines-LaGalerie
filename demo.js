@@ -10,6 +10,10 @@
 //   --no-smoke   never drive the smoke machine (indoor testing)
 //   --fast       run every step at ~1/3 duration (quick testing)
 //
+// Does NOT wait for hplayers to be reachable on startup (unlike gallery.js)
+// — this is the offline/indoor reference sequence, hplayer calls are already
+// best-effort (caught + logged) so a missing player just skips its cue.
+//
 // On startup all strips flash R/G/B/W once as a patch self-test.
 // ---------------------------------------------------------------------------
 

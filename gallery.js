@@ -21,22 +21,28 @@
 // before opening; use this file once the show is live.
 //
 // Flags:
-//   --no-smoke   fog starts disabled on the very first run (before
-//                gallery-state.json exists) — once toggled from the UI the
-//                persisted value wins on every future restart, flag or not
-//   --fast       run every timeline step at ~1/3 duration (quick testing)
+//   --no-smoke            fog starts disabled on the very first run (before
+//                         gallery-state.json exists) — once toggled from the
+//                         UI the persisted value wins on every future
+//                         restart, flag or not
+//   --fast                run every timeline step at ~1/3 duration (quick
+//                         testing)
+//   --skip-hplayer-wait   don't wait for hplayers to boot on startup (indoor
+//                         testing without the players reachable at all)
 // ---------------------------------------------------------------------------
 
 import http from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { setup, handleExit } from './src/setup.js';
+import { setup, handleExit, waitForHplayers } from './src/setup.js';
 
 const args = process.argv.slice(2);
 const timeScale = args.includes('--fast') ? 0.3 : 1;
 
 const { fixtures, config, shutdown } = await setup();
 handleExit(shutdown);
+
+if (!args.includes('--skip-hplayer-wait')) await waitForHplayers(fixtures);
 
 const show = config.show;
 const beam = fixtures.beam;

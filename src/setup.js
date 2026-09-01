@@ -50,6 +50,49 @@ export async function setup() {
   return { dmx, fixtures, config, shutdown };
 }
 
+/**
+ * Block until every hplayer fixture answers `ping()`. The hplayers are
+ * separate Raspberry Pis on the gallery WiFi (see src/fixtures/hplayer.js)
+ * — on a cold power-on they boot RastaOS independently of (and generally
+ * slower than) the DMX Pi running this app, so without this gate the show
+ * can reach a point's `sound`/`video` step before that point's hplayer is
+ * listening: the HTTP call fails, gets caught, and the cue is silently
+ * skipped for that lap of the timeline.
+ *
+ * No timeout: waits indefinitely, retrying forever, until every hplayer has
+ * responded at least once. Logs which ones are still missing every so often
+ * so it's obvious what the process is waiting on.
+ *
+ * @param {object} fixtures  the `fixtures` map returned by setup()
+ * @param {object} [options]
+ * @param {number} [options.intervalMs=2000] delay between retry rounds
+ */
+export async function waitForHplayers(fixtures, { intervalMs = 2000 } = {}) {
+  const players = Object.entries(fixtures).filter(([, f]) => f instanceof HPlayer);
+  if (players.length === 0) return;
+
+  const pending = new Map(players); // name -> fixture, shrinks as players come up
+  console.log(`[boot] waiting for ${pending.size} hplayer(s) to come online...`);
+
+  let round = 0;
+  while (pending.size > 0) {
+    await Promise.all([...pending].map(([name, hplayer]) =>
+      hplayer.ping().then(() => {
+        console.log(`[boot] ${name} (${hplayer.host}) is up`);
+        pending.delete(name);
+      }).catch(() => {}), // still not up — stays in `pending`, retried next round
+    ));
+    if (pending.size === 0) break;
+    round += 1;
+    if (round % 15 === 0) { // ~every 30s at the default interval
+      console.log(`[boot] still waiting on ${pending.size} hplayer(s): ` +
+        `${[...pending.keys()].join(', ')}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  console.log('[boot] all hplayers online');
+}
+
 /** Install a Ctrl+C / SIGTERM handler that blacks out before exiting. */
 export function handleExit(shutdown) {
   let closing = false;
