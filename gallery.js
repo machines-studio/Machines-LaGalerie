@@ -21,6 +21,10 @@
 //     pre-roll or video); resume un-freezes and resumes that same hplayer.
 //     NOT persisted — always starts playing on process restart, so a stale
 //     "paused" state can't survive a power cycle unnoticed.
+//   - "disco speedup": caps the 'disco' step (search wander + smoke + sound
+//     pre-roll) at an operator-entered X seconds instead of each point's
+//     own sound.seconds — the sound is stopped at that same X. Takes effect
+//     on the next 'disco' step; persisted to gallery-state.json.
 //
 // This is intentionally a SMALLER surface than panel.js: no raw channel
 // access, no full manual fixture control. Use panel.js for calibration
@@ -96,7 +100,7 @@ await stopAllHplayers(fixtures);
 // How long to keep the shutter closed while the color wheel physically
 // rotates to its new band. Real hardware travel time, not part of the show
 // timing — stays constant even under --fast.
-const COLOR_CHANGE_BLINK_MS = 150;
+const COLOR_CHANGE_BLINK_MS = 600;
 
 // --- persistent gallery state (survives power loss, not just process restart) --
 // Master volume (applies to every hplayer at once — there is no per-player
@@ -104,7 +108,10 @@ const COLOR_CHANGE_BLINK_MS = 150;
 // config.js: this is runtime state the gallery UI writes, config.js is
 // hand-edited/versioned).
 const STATE_PATH = fileURLToPath(new URL('./gallery-state.json', import.meta.url));
-const DEFAULT_STATE = { volume: 80, smokeEnabled: !args.includes('--no-smoke') };
+// discoSpeedupSeconds: null (default) = 'disco' runs for the point's own
+// sound.seconds, same as demo.js. A number caps it at that many seconds
+// instead — the sound is stopped at the same X, not just the beam/smoke.
+const DEFAULT_STATE = { volume: 80, smokeEnabled: !args.includes('--no-smoke'), discoSpeedupSeconds: null };
 
 async function loadState() {
   try {
@@ -169,6 +176,16 @@ function targetPoint(step) {
 
 function stepSeconds(step) {
   if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
+  // 'disco' runs for as long as the point's sound pre-roll does, not a
+  // fixed duration — so the search wander/smoke/sound all naturally end
+  // together. Points with no `sound` field fall back to this step's own
+  // `seconds` (there's no clip length to follow). The gallery UI's disco
+  // speedup (state.discoSpeedupSeconds), when set, overrides that with a
+  // fixed X instead — see POST /api/disco-speedup below.
+  if (step.phase === 'disco') {
+    if (state.discoSpeedupSeconds != null) return state.discoSpeedupSeconds;
+    return points[pointIndex].sound?.seconds ?? step.seconds;
+  }
   return step.seconds;
 }
 
@@ -201,8 +218,7 @@ function enter(index) {
       beam.setColor(point.color);
       setTimeout(() => beam.shutterOpen(), COLOR_CHANGE_BLINK_MS);
       beam.setFocus(point.beam.focus ?? 128);
-      beam.setFrost(point.beam.frost ?? false);
-      const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
+      const smokeSec = Math.min(step.smokeSeconds, stepSeconds(step)) * timeScale;
       if (state.smokeEnabled) smokeFixture.burst(step.smokePercent, smokeSec);
       // Sound pre-roll starts right alongside the search wander and smoke —
       // all three run together for this step. Points with no `sound` field
@@ -229,6 +245,9 @@ function enter(index) {
         soundStopped = true;
         fixtures[point.sound.hplayer].stop().catch(() => {});
       }
+      // Frost only kicks in once the beam is locking onto the point, not
+      // during the open search wander.
+      beam.setFrost(point.beam.frost ?? false);
       focusFrom = { ...pos };
       console.log(`[gallery] point ${n}: locking onto (pan ${point.beam.pan}°, tilt ${point.beam.tilt}°)`);
       break;
@@ -364,14 +383,14 @@ function tick() {
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
-      // Sound only plays for its own sound.seconds — stop it there rather
-      // than leaving it running for the rest of this (possibly longer) step.
-      if (point.sound && !soundStopped) {
-        const soundDur = point.sound.seconds * timeScale;
-        if (t >= soundDur) {
-          soundStopped = true;
-          fixtures[point.sound.hplayer].stop().catch(() => {});
-        }
+      // This step's own duration (dur) IS the sound's stop point — either
+      // point.sound.seconds normally, or the gallery UI's disco speedup
+      // when set (see stepSeconds()) — so this fires right as the step
+      // ends. A safety net in case a tick lands slightly late, not a
+      // separate shorter cutoff.
+      if (point.sound && !soundStopped && t >= dur) {
+        soundStopped = true;
+        fixtures[point.sound.hplayer].stop().catch(() => {});
       }
       if (t >= dur) advance();
       break;
@@ -479,6 +498,7 @@ const server = http.createServer(async (req, res) => {
         current: { pointIndex, phase: timeline[stepIndex].phase },
         volume: state.volume,
         smokeEnabled: state.smokeEnabled,
+        discoSpeedupSeconds: state.discoSpeedupSeconds,
         paused,
       });
     }
@@ -520,6 +540,26 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/fog') {
       state.smokeEnabled = !!body.enabled;
       if (!state.smokeEnabled) smokeFixture.off();
+      await saveState();
+      return sendJson(200, { ok: true });
+    }
+
+    // POST /api/disco-speedup  { seconds: number | null } — caps the 'disco'
+    // step (search wander + smoke + sound pre-roll) at this many seconds
+    // instead of the point's own sound.seconds; the sound is stopped at the
+    // same point, not just the beam/smoke. null/omitted disables the cap,
+    // back to each point's own sound length. Takes effect on the next
+    // 'disco' step entered — persisted to disk (gallery-state.json).
+    if (req.url === '/api/disco-speedup') {
+      if (body.seconds === null || body.seconds === undefined) {
+        state.discoSpeedupSeconds = null;
+      } else {
+        const s = Number(body.seconds);
+        if (!Number.isFinite(s) || s < 1 || s > 600) {
+          return sendJson(400, { error: 'seconds must be between 1 and 600, or null' });
+        }
+        state.discoSpeedupSeconds = s;
+      }
       await saveState();
       return sendJson(200, { ok: true });
     }

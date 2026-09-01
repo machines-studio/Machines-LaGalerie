@@ -81,6 +81,11 @@ function targetPoint(step) {
 
 function stepSeconds(step) {
   if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
+  // 'disco' runs for as long as the point's sound pre-roll does, not a
+  // fixed duration — so the search wander/smoke/sound all naturally end
+  // together. Points with no `sound` field fall back to this step's own
+  // `seconds` (there's no clip length to follow).
+  if (step.phase === 'disco') return points[pointIndex].sound?.seconds ?? step.seconds;
   return step.seconds;
 }
 
@@ -101,8 +106,7 @@ function enter(index) {
       beam.setColor(point.color);
       setTimeout(() => beam.shutterOpen(), COLOR_CHANGE_BLINK_MS);
       beam.setFocus(point.beam.focus ?? 128);
-      beam.setFrost(point.beam.frost ?? false);
-      const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
+      const smokeSec = Math.min(step.smokeSeconds, stepSeconds(step)) * timeScale;
       if (smoke) smoke.burst(step.smokePercent, smokeSec);
       // Sound pre-roll starts right alongside the search wander and smoke —
       // all three run together for this step. Points with no `sound` field
@@ -128,6 +132,9 @@ function enter(index) {
         soundStopped = true;
         fixtures[point.sound.hplayer].stop().catch(() => {});
       }
+      // Frost only kicks in once the beam is locking onto the point, not
+      // during the open search wander.
+      beam.setFrost(point.beam.frost ?? false);
       focusFrom = { ...pos };
       console.log(`[show] point ${n}: locking onto (pan ${point.beam.pan}°, tilt ${point.beam.tilt}°)`);
       break;
@@ -192,8 +199,9 @@ function tick() {
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
-      // Sound only plays for its own sound.seconds — stop it there rather
-      // than leaving it running for the rest of this (possibly longer) step.
+      // This step's own duration IS point.sound.seconds (see stepSeconds()),
+      // so this fires right as the step ends — a safety net in case a tick
+      // lands slightly late, not a separate shorter cutoff.
       if (point.sound && !soundStopped) {
         const soundDur = point.sound.seconds * timeScale;
         if (t >= soundDur) {

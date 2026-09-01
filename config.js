@@ -86,9 +86,12 @@ export default {
     // (see STRIP_COLORS in src/fixtures/rgbw-strip.js and BEAM_COLORS in
     // src/fixtures/hero-beam-100.js — must be a name valid in both), where
     // and how the beam settles once it locks onto this point, and its video.
-    //   beam     { pan, tilt, dimmer, focus, frost } applied when the
-    //            'reveal' step locks onto this point (see
-    //            src/fixtures/hero-beam-100.js). pan/tilt in degrees
+    //   beam     { pan, tilt, dimmer, focus, frost } for the beam as it
+    //            locks onto and reveals this point (see
+    //            src/fixtures/hero-beam-100.js) — pan/tilt/dimmer/focus
+    //            apply from the 'reveal' step, frost from 'focus' (one
+    //            step earlier: on while locking on and revealed, off
+    //            during the open search wander). pan/tilt in degrees
     //            (0-540 / 0-250) — where the beam aims. dimmer 0-255,
     //            defaults to 255 (full) if omitted — brightness once
     //            revealed. focus 0 (far) - 255 (close), defaults to 128
@@ -119,38 +122,39 @@ export default {
     //            plus its own `hplayer` (may differ from the point's own,
     //            e.g. routed to a center speaker — remember its file numbers
     //            share that player's numbering space with any video living
-    //            there too). `seconds` is how long the clip plays before
-    //            being stopped (should match that clip's length, and fit
-    //            within 'disco's own `seconds`, or it gets cut short when
-    //            'disco' ends anyway). Omit the whole field to skip the
-    //            sound pre-roll for that point.
+    //            there too). `seconds` is that clip's own runtime — it IS
+    //            the 'disco' step's hold time for this point (the timeline's
+    //            own `disco.seconds` is only a fallback for points with no
+    //            `sound` field). Omit the whole field to skip the sound
+    //            pre-roll for that point — 'disco' then falls back to its
+    //            fixed `seconds`.
     points: [
       {
         strip: 'strip2',
         hplayer: 'hplayer2',
         color: 'white',
-        beam: { pan: 179, tilt: 71, dimmer: 255, focus: 255, frost: true },
-        video: { file: 1, seconds: 9 },
-        sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
+        beam: { pan: 180, tilt: 125, dimmer: 255, focus: 255, frost: false },
+        video: { file: 1, seconds: 726 },
+        sound: { hplayer: 'hplayer2', file: 2, seconds: 73 },
       },
       {
         strip: 'strip1',
         hplayer: 'hplayer1',
         color: 'red',
-        beam: { pan: 451, tilt: 191, dimmer: 255, focus: 255, frost: false },
+        beam: { pan: 271, tilt: 60, dimmer: 255, focus: 144, frost: false },
         // hplayer2 also hosts every point's sound pre-roll (files 2-4 below)
         // — keep this point's video file number (1) distinct from those, or
         // /trig/N is ambiguous between the video and a sound clip.
-        video: { file: 1, seconds: 9 },
-        sound: { hplayer: 'hplayer2', file: 3, seconds: 8 },
+        video: { file: 1, seconds: 643 },
+        sound: { hplayer: 'hplayer2', file: 3, seconds: 76 },
       },
       {
         strip: 'strip3',
         hplayer: 'hplayer3',
         color: 'green',
-        beam: { pan: 267, tilt: 190, dimmer: 255, focus: 255, frost: false },
-        video: { file: 1, seconds: 9 },
-        sound: { hplayer: 'hplayer2', file: 4, seconds: 8 },
+        beam: { pan: 88, tilt: 59, dimmer: 255, focus: 0, frost: false },
+        video: { file: 1, seconds: 1236 },
+        sound: { hplayer: 'hplayer2', file: 4, seconds: 66 },
       },
     ],
 
@@ -159,11 +163,11 @@ export default {
       // 1. "disco": beam wanders inside the pan/tilt window below, colored
       //    for the point about to be found, while the smoke machine and the
       //    point's sound pre-roll (if any) both run alongside it, all three
-      //    starting together. Smoke fires for smokeSeconds then stops on its
-      //    own (capped by this step's `seconds`) — it does not run for the
-      //    whole step. The sound clip similarly gets stopped once its own
-      //    sound.seconds is up (or when this step ends, whichever comes
-      //    first) — points with no `sound` field just skip that part.
+      //    starting together. This step's hold time is the point's own
+      //    sound.seconds when it has a sound pre-roll — `seconds` below is
+      //    only the fallback for points with none. Smoke fires for
+      //    smokeSeconds then stops on its own — it does not run for the
+      //    whole step.
       {
         phase: 'disco', seconds: 12,
         smokePercent: 20, smokeSeconds: 3,

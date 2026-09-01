@@ -44,6 +44,10 @@
   .row { display: flex; align-items: center; gap: 0.9rem; }
   .row output { min-width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
   input[type=range] { flex: 1; accent-color: #4a9eff; height: 1.6rem; }
+  input[type=number] {
+    width: 5rem; background: #23262e; color: #e6e6e6; border: 1px solid #3a4050;
+    border-radius: 8px; padding: 0.6rem 0.7rem; font: inherit; font-size: 0.95rem;
+  }
   .toggle {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0.2rem 0;
@@ -96,6 +100,15 @@
   </div>
 </div>
 
+<div class="card">
+  <h2>Disco speedup</h2>
+  <div class="row">
+    <input type="number" id="discoSeconds" min="1" max="600" step="1" placeholder="12">
+    <button class="primary" id="discoSpeedupBtn">Enable</button>
+  </div>
+  <div class="hint">Caps the search/smoke/sound step at this many seconds instead of the point's full sound length — the sound stops at the same time. Applies from the next time the beam starts searching.</div>
+</div>
+
 <script>
 const $ = (sel, el = document) => el.querySelector(sel);
 const post = (url, body) =>
@@ -143,6 +156,14 @@ async function refresh() {
   pauseBtn.textContent = state.paused ? '▶ Play' : '⏸ Pause';
   pauseBtn.classList.toggle('paused', state.paused);
   pauseBtn.classList.toggle('primary', !state.paused);
+
+  const discoInput = $('#discoSeconds');
+  const discoBtn = $('#discoSpeedupBtn');
+  const discoOn = state.discoSpeedupSeconds != null;
+  if (document.activeElement !== discoInput && discoOn) discoInput.value = state.discoSpeedupSeconds;
+  discoBtn.textContent = discoOn ? 'Disable' : 'Enable';
+  discoBtn.classList.toggle('paused', discoOn);
+  discoBtn.classList.toggle('primary', !discoOn);
 }
 
 $('#volume').addEventListener('input', (e) => {
@@ -175,6 +196,22 @@ $('#pauseBtn').onclick = async () => {
   $('#pauseWarning').textContent = (res.ok && res.hplayerOk === false)
     ? '⚠ player didn\'t confirm — may be out of sync'
     : '';
+  refresh();
+};
+
+$('#discoSpeedupBtn').onclick = async () => {
+  const on = $('#discoSpeedupBtn').classList.contains('paused');
+  if (on) {
+    // currently enabled -> disable
+    await post('/api/disco-speedup', { seconds: null });
+  } else {
+    const seconds = Math.round(Number($('#discoSeconds').value));
+    if (!Number.isFinite(seconds) || seconds < 1 || seconds > 600) {
+      $('#discoSeconds').focus();
+      return;
+    }
+    await post('/api/disco-speedup', { seconds });
+  }
   refresh();
 };
 
