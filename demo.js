@@ -58,11 +58,11 @@ let wander = null;                  // current random search target
 let wanderAge = 0;
 let focusFrom = null;               // position when the focus step started
 
-// The point whose color/hplayer/strip is "active" for a given step. During
-// 'search' the beam previews the UPCOMING point's color, so that step looks
-// one point ahead; every other step targets the current point.
+// The point whose color/hplayer/strip is "active" for a given step. Every
+// step in a pass — including 'search' — targets the same current point:
+// the beam searches in that point's color, then locks onto and reveals
+// that same point right after.
 function targetPoint(step) {
-  if (step.phase === 'search') return points[(pointIndex + 1) % points.length];
   return points[pointIndex];
 }
 
@@ -85,8 +85,7 @@ function enter(index) {
       beam.setColor(point.color);
       const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
       if (smoke) smoke.burst(step.smokePercent, smokeSec);
-      const nextN = (pointIndex + 1) % points.length + 1;
-      console.log(`[show] point ${n}: searching for point ${nextN} (${point.color})...` +
+      console.log(`[show] point ${n}: searching (${point.color})...` +
         (smoke ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : ''));
       break;
     }
@@ -116,6 +115,11 @@ function enter(index) {
     case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
+      // Sound pre-roll is done holding its 'sound' step — stop it explicitly
+      // rather than letting it keep playing under the video (it may live on
+      // a different hplayer than the point's own).
+      const soundHplayer = point.sound ? fixtures[point.sound.hplayer] : null;
+      if (soundHplayer) soundHplayer.stop().catch(() => {});
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
         hplayer.trig(point.video.file ?? 1).catch((err) =>

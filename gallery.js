@@ -15,6 +15,11 @@
 //     resumes normal looping afterwards
 //   - fog machine master on/off (disables the automatic search-phase bursts;
 //     persisted to gallery-state.json, survives a power cycle)
+//   - global play/pause: freezes the whole timeline (beam/smoke/strip stop
+//     changing) and pauses whichever hplayer is currently playing (sound
+//     pre-roll or video); resume un-freezes and resumes that same hplayer.
+//     NOT persisted — always starts playing on process restart, so a stale
+//     "paused" state can't survive a power cycle unnoticed.
 //
 // This is intentionally a SMALLER surface than panel.js: no raw channel
 // access, no full manual fixture control. Use panel.js for calibration
@@ -109,14 +114,18 @@ let wander = null;
 let wanderAge = 0;
 let focusFrom = null;
 let focusRequest = null; // point index requested via the gallery UI, or null
+let paused = false; // global play/pause, set via the gallery UI, not persisted
+let pausedAt = null; // Date.now() when paused; used to shift stepStart on resume
 
 // Index of the timeline's 'beamFade' and 'video' steps — resolved once
 // so a "goto focus" hard-cut can jump straight to beamFade.
 const beamFadeIndex = timeline.findIndex((s) => s.phase === 'beamFade');
 if (beamFadeIndex === -1) throw new Error("show.timeline needs a 'beamFade' step");
 
+// Every step in a pass — including 'search' — targets the same current
+// point: the beam searches in that point's color, then locks onto and
+// reveals that same point right after.
 function targetPoint(step) {
-  if (step.phase === 'search') return points[(pointIndex + 1) % points.length];
   return points[pointIndex];
 }
 
@@ -124,6 +133,17 @@ function stepSeconds(step) {
   if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
   if (step.phase === 'sound') return points[pointIndex].sound?.seconds ?? 0;
   return step.seconds;
+}
+
+// The hplayer actually producing sound/picture right now, if any — the
+// current point's sound hplayer during 'sound', its own hplayer during
+// 'video'. Used by play/pause to pause/resume the right player.
+function activeHplayer() {
+  const step = timeline[stepIndex];
+  const point = points[pointIndex];
+  if (step.phase === 'sound' && point.sound) return fixtures[point.sound.hplayer];
+  if (step.phase === 'video' && point.hplayer) return fixtures[point.hplayer];
+  return null;
 }
 
 function enter(index) {
@@ -139,8 +159,7 @@ function enter(index) {
       beam.setColor(point.color);
       const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
       if (state.smokeEnabled) smokeFixture.burst(step.smokePercent, smokeSec);
-      const nextN = (pointIndex + 1) % points.length + 1;
-      console.log(`[gallery] point ${n}: searching for point ${nextN} (${point.color})...` +
+      console.log(`[gallery] point ${n}: searching (${point.color})...` +
         (state.smokeEnabled ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : ''));
       break;
     }
@@ -172,6 +191,11 @@ function enter(index) {
     case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
+      // Sound pre-roll is done holding its 'sound' step — stop it explicitly
+      // rather than letting it keep playing under the video (it may live on
+      // a different hplayer than the point's own).
+      const soundHplayer = point.sound ? fixtures[point.sound.hplayer] : null;
+      if (soundHplayer) soundHplayer.stop().catch(() => {});
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
         hplayer.trig(point.video.file ?? 1)
@@ -219,7 +243,31 @@ function advance() {
   }
 }
 
+// Global play/pause. Pausing freezes the timeline (tick() becomes a no-op)
+// and pauses whichever hplayer is currently playing; resuming shifts
+// `stepStart` forward by the paused duration — so the in-progress step picks
+// up exactly where it left off — and resumes that same hplayer.
+async function setPaused(next) {
+  if (next === paused) return;
+  const hplayer = activeHplayer();
+  if (next) {
+    paused = true;
+    pausedAt = Date.now();
+    if (hplayer) await hplayer.pause().catch((err) =>
+      console.error(`[gallery] pause on ${hplayer.host} failed: ${err.message}`));
+    console.log('[gallery] paused');
+  } else {
+    stepStart += Date.now() - pausedAt;
+    paused = false;
+    if (hplayer) await hplayer.resume().catch((err) =>
+      console.error(`[gallery] resume on ${hplayer.host} failed: ${err.message}`));
+    console.log('[gallery] resumed');
+  }
+}
+
 function tick() {
+  if (paused) return; // frozen — beam/smoke/strip hold, hplayer already paused via /api/pause
+
   const step = timeline[stepIndex];
   const t = (Date.now() - stepStart) / 1000;
   const dur = stepSeconds(step) * timeScale;
@@ -345,6 +393,7 @@ const server = http.createServer(async (req, res) => {
         current: { pointIndex, phase: timeline[stepIndex].phase },
         volume: state.volume,
         smokeEnabled: state.smokeEnabled,
+        paused,
       });
     }
 
@@ -359,6 +408,14 @@ const server = http.createServer(async (req, res) => {
       state.volume = v;
       await saveState();
       await applyVolume();
+      return sendJson(200, { ok: true });
+    }
+
+    // POST /api/pause  { paused: boolean } — freezes/resumes the whole
+    // timeline and pauses/resumes whichever hplayer is currently playing.
+    // Not persisted: always starts playing on process restart.
+    if (req.url === '/api/pause') {
+      await setPaused(!!body.paused);
       return sendJson(200, { ok: true });
     }
 
