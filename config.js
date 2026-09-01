@@ -185,12 +185,15 @@ export default {
       //    hplayer start (sequential, no overlap).
       { phase: 'beamFade', seconds: 2 },
 
-      // 5. strip fades in (point color) + hplayer trigs points[].video.file,
-      //    together. Holds for the point's video length (points[].video.seconds)
-      //    plus this artist-tunable buffer, then the strip fades out. No
-      //    `seconds` here on purpose — total hold time is
-      //    points[].video.seconds + extraSeconds.
-      { phase: 'video', extraSeconds: 5 },
+      // 5. strip fades in (point color) first; the hplayer only trigs
+      //    points[].video.file after startDelaySeconds — so the strip is
+      //    already lit for a beat before the video starts, instead of both
+      //    happening at once. Holds for startDelaySeconds + the point's
+      //    video length (points[].video.seconds) + this artist-tunable
+      //    buffer, then the strip fades out. No `seconds` here on purpose —
+      //    total hold time is startDelaySeconds + points[].video.seconds +
+      //    extraSeconds.
+      { phase: 'video', startDelaySeconds: 3, extraSeconds: 5 },
 
       // 6. everything off for a beat before the next point begins.
       { phase: 'gap', seconds: 5 },

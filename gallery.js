@@ -159,6 +159,7 @@ let focusFrom = null;
 let focusRequest = null; // point index requested via the gallery UI, or null
 let paused = false; // global play/pause, set via the gallery UI, not persisted
 let pausedAt = null; // Date.now() when paused; used to shift stepStart on resume
+let videoStarted = false; // one-shot: has the current 'video' step's hplayer been trig'd yet
 let videoStopped = false; // one-shot: has the current 'video' step's hplayer been stopped yet
 let soundStopped = false; // one-shot: has the current 'disco' step's sound hplayer been stopped yet
 
@@ -175,7 +176,12 @@ function targetPoint(step) {
 }
 
 function stepSeconds(step) {
-  if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
+  // Strip lights up at t=0; the hplayer only trigs after startDelaySeconds
+  // (defaults to 0 if omitted) — total hold is that delay + the video's own
+  // runtime + the artist-tunable buffer after it ends.
+  if (step.phase === 'video') {
+    return (step.startDelaySeconds ?? 0) + points[pointIndex].video.seconds + step.extraSeconds;
+  }
   // 'disco' runs for as long as the point's sound pre-roll does, not a
   // fixed duration — so the search wander/smoke/sound all naturally end
   // together. Points with no `sound` field fall back to this step's own
@@ -197,7 +203,10 @@ function activeHplayer() {
   const step = timeline[stepIndex];
   const point = points[pointIndex];
   if (step.phase === 'disco' && point.sound) return fixtures[point.sound.hplayer];
-  if (step.phase === 'video' && point.hplayer) return fixtures[point.hplayer];
+  // Only once the hplayer has actually been trig'd (see tick()'s 'video'
+  // case) — during the pre-video startDelaySeconds window it's still idle,
+  // nothing to pause/resume yet.
+  if (step.phase === 'video' && videoStarted && point.hplayer) return fixtures[point.hplayer];
   return null;
 }
 
@@ -265,15 +274,12 @@ function enter(index) {
     case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
+      videoStarted = false;
       videoStopped = false;
-      const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
-      if (hplayer) {
-        hplayer.trig(point.video.file ?? 1)
-          .then(() => hplayer.volume(state.volume)) // in case the player reset its own volume
-          .catch((err) => console.error(`[gallery] ${point.hplayer} trig failed: ${err.message}`));
-      }
+      // hplayer.trig() itself is deferred to tick() until startDelaySeconds
+      // has passed — the strip fades in right away here, on its own.
       console.log(`[gallery] point ${n}: strip '${point.strip}' fading in (${point.color})` +
-        (hplayer ? ` + ${point.hplayer} trig ${point.video.file ?? 1}` : ''));
+        (point.hplayer ? ` + ${point.hplayer} trig ${point.video.file ?? 1} in ${step.startDelaySeconds ?? 0}s` : ''));
       break;
     }
     case 'gap':
@@ -433,14 +439,26 @@ function tick() {
       else if (dur - t < fadeSeconds) scale = (dur - t) / fadeSeconds;
       else scale = 1;
       strip.setNamedColor(point.color, Math.max(0, Math.min(1, scale)));
-      // The clip itself only runs for video.seconds — extraSeconds is just
-      // how much longer the strip stays lit after. Stop the hplayer once the
-      // clip's own runtime is up rather than leaving it playing/looping for
-      // the rest of this step's (longer) hold.
-      const videoDur = point.video.seconds * timeScale;
-      if (!videoStopped && t >= videoDur) {
+      const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
+      const startDelay = (step.startDelaySeconds ?? 0) * timeScale;
+      // Strip fades in right away (above); the hplayer only trigs once the
+      // strip has had startDelaySeconds to itself.
+      if (!videoStarted && t >= startDelay) {
+        videoStarted = true;
+        if (hplayer) {
+          hplayer.trig(point.video.file ?? 1)
+            .then(() => hplayer.volume(state.volume)) // in case the player reset its own volume
+            .catch((err) => console.error(`[gallery] ${point.hplayer} trig failed: ${err.message}`));
+        }
+      }
+      // The clip itself only runs for video.seconds, starting at startDelay
+      // — extraSeconds is just how much longer the strip stays lit after.
+      // Stop the hplayer once the clip's own runtime is up rather than
+      // leaving it playing/looping for the rest of this step's (longer)
+      // hold.
+      const videoEnd = startDelay + point.video.seconds * timeScale;
+      if (!videoStopped && t >= videoEnd) {
         videoStopped = true;
-        const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
         if (hplayer) hplayer.stop().catch(() => {});
       }
       if (k >= 1) {

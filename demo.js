@@ -68,6 +68,7 @@ const pos = { pan: 270, tilt: 55 }; // beam position we are steering (degrees)
 let wander = null;                  // current random search target
 let wanderAge = 0;
 let focusFrom = null;               // position when the focus step started
+let videoStarted = false;           // one-shot: has the current 'video' step's hplayer been trig'd yet
 let videoStopped = false;           // one-shot: has the current 'video' step's hplayer been stopped yet
 let soundStopped = false;           // one-shot: has the current 'disco' step's sound hplayer been stopped yet
 
@@ -80,7 +81,12 @@ function targetPoint(step) {
 }
 
 function stepSeconds(step) {
-  if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
+  // Strip lights up at t=0; the hplayer only trigs after startDelaySeconds
+  // (defaults to 0 if omitted) — total hold is that delay + the video's own
+  // runtime + the artist-tunable buffer after it ends.
+  if (step.phase === 'video') {
+    return (step.startDelaySeconds ?? 0) + points[pointIndex].video.seconds + step.extraSeconds;
+  }
   // 'disco' runs for as long as the point's sound pre-roll does, not a
   // fixed duration — so the search wander/smoke/sound all naturally end
   // together. Points with no `sound` field fall back to this step's own
@@ -151,14 +157,12 @@ function enter(index) {
     case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
+      videoStarted = false;
       videoStopped = false;
-      const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
-      if (hplayer) {
-        hplayer.trig(point.video.file ?? 1).catch((err) =>
-          console.error(`[show] ${point.hplayer} trig failed: ${err.message}`));
-      }
+      // hplayer.trig() itself is deferred to tick() until startDelaySeconds
+      // has passed — the strip fades in right away here, on its own.
       console.log(`[show] point ${n}: strip '${point.strip}' fading in (${point.color})` +
-        (hplayer ? ` + ${point.hplayer} trig ${point.video.file ?? 1}` : ''));
+        (point.hplayer ? ` + ${point.hplayer} trig ${point.video.file ?? 1} in ${step.startDelaySeconds ?? 0}s` : ''));
       break;
     }
     case 'gap':
@@ -245,14 +249,25 @@ function tick() {
       else if (dur - t < fadeSeconds) scale = (dur - t) / fadeSeconds; // fade out
       else scale = 1;                                             // steady hold
       strip.setNamedColor(point.color, Math.max(0, Math.min(1, scale)));
-      // The clip itself only runs for video.seconds — extraSeconds is just
-      // how much longer the strip stays lit after. Stop the hplayer once the
-      // clip's own runtime is up rather than leaving it playing/looping for
-      // the rest of this step's (longer) hold.
-      const videoDur = point.video.seconds * timeScale;
-      if (!videoStopped && t >= videoDur) {
+      const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
+      const startDelay = (step.startDelaySeconds ?? 0) * timeScale;
+      // Strip fades in right away (above); the hplayer only trigs once the
+      // strip has had startDelaySeconds to itself.
+      if (!videoStarted && t >= startDelay) {
+        videoStarted = true;
+        if (hplayer) {
+          hplayer.trig(point.video.file ?? 1).catch((err) =>
+            console.error(`[show] ${point.hplayer} trig failed: ${err.message}`));
+        }
+      }
+      // The clip itself only runs for video.seconds, starting at startDelay
+      // — extraSeconds is just how much longer the strip stays lit after.
+      // Stop the hplayer once the clip's own runtime is up rather than
+      // leaving it playing/looping for the rest of this step's (longer)
+      // hold.
+      const videoEnd = startDelay + point.video.seconds * timeScale;
+      if (!videoStopped && t >= videoEnd) {
         videoStopped = true;
-        const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
         if (hplayer) hplayer.stop().catch(() => {});
       }
       if (k >= 1) {
