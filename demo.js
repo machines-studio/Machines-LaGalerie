@@ -57,6 +57,7 @@ const pos = { pan: 270, tilt: 55 }; // beam position we are steering (degrees)
 let wander = null;                  // current random search target
 let wanderAge = 0;
 let focusFrom = null;               // position when the focus step started
+let videoStopped = false;           // one-shot: has the current 'video' step's hplayer been stopped yet
 
 // The point whose color/hplayer/strip is "active" for a given step. Every
 // step in a pass — including 'search' — targets the same current point:
@@ -120,6 +121,7 @@ function enter(index) {
       // a different hplayer than the point's own).
       const soundHplayer = point.sound ? fixtures[point.sound.hplayer] : null;
       if (soundHplayer) soundHplayer.stop().catch(() => {});
+      videoStopped = false;
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
         hplayer.trig(point.video.file ?? 1).catch((err) =>
@@ -208,6 +210,16 @@ function tick() {
       else if (dur - t < fadeSeconds) scale = (dur - t) / fadeSeconds; // fade out
       else scale = 1;                                             // steady hold
       strip.setNamedColor(point.color, Math.max(0, Math.min(1, scale)));
+      // The clip itself only runs for video.seconds — extraSeconds is just
+      // how much longer the strip stays lit after. Stop the hplayer once the
+      // clip's own runtime is up rather than leaving it playing/looping for
+      // the rest of this step's (longer) hold.
+      const videoDur = point.video.seconds * timeScale;
+      if (!videoStopped && t >= videoDur) {
+        videoStopped = true;
+        const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
+        if (hplayer) hplayer.stop().catch(() => {});
+      }
       if (k >= 1) {
         strip.off();
         advance();

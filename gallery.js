@@ -116,6 +116,7 @@ let focusFrom = null;
 let focusRequest = null; // point index requested via the gallery UI, or null
 let paused = false; // global play/pause, set via the gallery UI, not persisted
 let pausedAt = null; // Date.now() when paused; used to shift stepStart on resume
+let videoStopped = false; // one-shot: has the current 'video' step's hplayer been stopped yet
 
 // Index of the timeline's 'beamFade' and 'video' steps — resolved once
 // so a "goto focus" hard-cut can jump straight to beamFade.
@@ -196,6 +197,7 @@ function enter(index) {
       // a different hplayer than the point's own).
       const soundHplayer = point.sound ? fixtures[point.sound.hplayer] : null;
       if (soundHplayer) soundHplayer.stop().catch(() => {});
+      videoStopped = false;
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
         hplayer.trig(point.video.file ?? 1)
@@ -333,6 +335,16 @@ function tick() {
       else if (dur - t < fadeSeconds) scale = (dur - t) / fadeSeconds;
       else scale = 1;
       strip.setNamedColor(point.color, Math.max(0, Math.min(1, scale)));
+      // The clip itself only runs for video.seconds — extraSeconds is just
+      // how much longer the strip stays lit after. Stop the hplayer once the
+      // clip's own runtime is up rather than leaving it playing/looping for
+      // the rest of this step's (longer) hold.
+      const videoDur = point.video.seconds * timeScale;
+      if (!videoStopped && t >= videoDur) {
+        videoStopped = true;
+        const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
+        if (hplayer) hplayer.stop().catch(() => {});
+      }
       if (k >= 1) {
         strip.off();
         advance();
