@@ -93,6 +93,22 @@ export async function waitForHplayers(fixtures, { intervalMs = 2000 } = {}) {
   console.log('[boot] all hplayers online');
 }
 
+/**
+ * Stop every hplayer fixture (back to its idle loop), best-effort. Meant to
+ * run once at startup — a previous session that didn't shut down cleanly
+ * (crash, power cut) can leave a player mid-clip; without this it would sit
+ * there playing/looping that stale clip until the timeline happens to
+ * trig/stop it again.
+ *
+ * @param {object} fixtures  the `fixtures` map returned by setup()
+ */
+export async function stopAllHplayers(fixtures) {
+  const players = Object.entries(fixtures).filter(([, f]) => f instanceof HPlayer);
+  await Promise.all(players.map(([name, hplayer]) =>
+    hplayer.stop().catch((err) =>
+      console.error(`[boot] stop on ${name} (${hplayer.host}) failed: ${err.message}`))));
+}
+
 /** Install a Ctrl+C / SIGTERM handler that blacks out before exiting. */
 export function handleExit(shutdown) {
   let closing = false;

@@ -17,7 +17,7 @@
 // On startup all strips flash R/G/B/W once as a patch self-test.
 // ---------------------------------------------------------------------------
 
-import { setup, handleExit } from './src/setup.js';
+import { setup, handleExit, stopAllHplayers } from './src/setup.js';
 
 const args = process.argv.slice(2);
 const smokeEnabled = !args.includes('--no-smoke');
@@ -25,6 +25,12 @@ const timeScale = args.includes('--fast') ? 0.3 : 1;
 
 const { fixtures, config, shutdown } = await setup();
 handleExit(shutdown);
+
+// A previous session may have left a player mid-clip (crash, power cut) —
+// reset every hplayer to idle before the show starts driving them again.
+// Best-effort: a missing player here is caught/logged, same as every other
+// hplayer call in this file.
+await stopAllHplayers(fixtures);
 
 const show = config.show;
 const beam = fixtures.beam;

@@ -10,9 +10,10 @@
 //
 //   - one master volume slider, applied to all 3 hplayers at once
 //     (persisted to gallery-state.json, survives a power cycle)
-//   - "goto focus" per point: hard-cut takeover, jumps the live show
-//     straight to that point's beamFade -> video (video + strip),
-//     resumes normal looping afterwards
+//   - "goto focus" per point: takeover that cuts whatever is currently
+//     playing and jumps the live show to that point's search step, so it
+//     wanders/locks/reveals the requested point the normal way; resumes
+//     normal looping afterwards
 //   - fog machine master on/off (disables the automatic search-phase bursts;
 //     persisted to gallery-state.json, survives a power cycle)
 //   - global play/pause: freezes the whole timeline (beam/smoke/strip stop
@@ -39,7 +40,7 @@
 import http from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { setup, handleExit, waitForHplayers } from './src/setup.js';
+import { setup, handleExit, waitForHplayers, stopAllHplayers } from './src/setup.js';
 
 const args = process.argv.slice(2);
 const timeScale = args.includes('--fast') ? 0.3 : 1;
@@ -48,6 +49,10 @@ const { fixtures, config, shutdown } = await setup();
 handleExit(shutdown);
 
 if (!args.includes('--skip-hplayer-wait')) await waitForHplayers(fixtures);
+
+// A previous session may have left a player mid-clip (crash, power cut) —
+// reset every hplayer to idle before the show starts driving them again.
+await stopAllHplayers(fixtures);
 
 const show = config.show;
 const beam = fixtures.beam;
@@ -118,10 +123,10 @@ let paused = false; // global play/pause, set via the gallery UI, not persisted
 let pausedAt = null; // Date.now() when paused; used to shift stepStart on resume
 let videoStopped = false; // one-shot: has the current 'video' step's hplayer been stopped yet
 
-// Index of the timeline's 'beamFade' and 'video' steps — resolved once
-// so a "goto focus" hard-cut can jump straight to beamFade.
-const beamFadeIndex = timeline.findIndex((s) => s.phase === 'beamFade');
-if (beamFadeIndex === -1) throw new Error("show.timeline needs a 'beamFade' step");
+// Index of the timeline's 'search' step — resolved once so a "goto focus"
+// request can jump straight to it, for the requested point.
+const searchIndex = timeline.findIndex((s) => s.phase === 'search');
+if (searchIndex === -1) throw new Error("show.timeline needs a 'search' step");
 
 // Every step in a pass — including 'search' — targets the same current
 // point: the beam searches in that point's color, then locks onto and
@@ -219,8 +224,10 @@ function enter(index) {
 }
 
 function advance() {
-  // A focus request takes priority over the normal timeline order: hard-cut
-  // into the requested point's beamFade step, from wherever we are.
+  // A focus request takes priority over the normal timeline order: jump
+  // into the requested point's search step, from wherever we are, so the
+  // beam wanders/locks/reveals it the normal way instead of hard-cutting
+  // straight to a black fade-in.
   if (focusRequest !== null) {
     const requested = focusRequest;
     focusRequest = null;
@@ -230,9 +237,9 @@ function advance() {
       const soundHplayer = p.sound ? fixtures[p.sound.hplayer] : null;
       if (soundHplayer) soundHplayer.stop().catch(() => {});
     }
-    beam.setDimmer(0);
     pointIndex = requested;
-    enter(beamFadeIndex);
+    wander = null; // start the wander fresh toward the new point's window
+    enter(searchIndex);
     return;
   }
 
@@ -278,7 +285,7 @@ function tick() {
   // A focus request can also interrupt mid-step, not just at step
   // boundaries — otherwise a 90 s video step would ignore the button for
   // up to 90 s. Only skip if we're not already exactly where it wants us.
-  if (focusRequest !== null && !(stepIndex === beamFadeIndex && pointIndex === focusRequest)) {
+  if (focusRequest !== null && !(stepIndex === searchIndex && pointIndex === focusRequest)) {
     advance();
     return;
   }
