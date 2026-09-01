@@ -10,7 +10,7 @@
 // names (see hero-beam-100.js BEAM_COLORS) — the two fixtures pick color in
 // fundamentally different ways (mixed LEDs vs. a physical wheel).
 export const STRIP_COLORS = {
-  white: { r: 0, g: 0, b: 0, w: 255 },
+  white: { r: 255, g: 255, b: 255, w: 255 },
   red: { r: 255, g: 0, b: 0, w: 0 },
   green: { r: 0, g: 255, b: 0, w: 0 },
   blue: { r: 0, g: 0, b: 255, w: 0 },
