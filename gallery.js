@@ -163,6 +163,7 @@ function enter(index) {
     case 'search': {
       beam.shutterOpen();
       beam.setColor(point.color);
+      beam.setFocus(point.beam.focus ?? 128);
       const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
       if (state.smokeEnabled) smokeFixture.burst(step.smokePercent, smokeSec);
       console.log(`[gallery] point ${n}: searching (${point.color})...` +
@@ -172,11 +173,12 @@ function enter(index) {
     case 'focus':
       smokeFixture.off();
       focusFrom = { ...pos };
-      console.log(`[gallery] point ${n}: locking onto (pan ${point.pan}°, tilt ${point.tilt}°)`);
+      console.log(`[gallery] point ${n}: locking onto (pan ${point.beam.pan}°, tilt ${point.beam.tilt}°)`);
       break;
     case 'reveal':
-      beam.setPosition(point.pan, point.tilt);
-      beam.setDimmer(255);
+      beam.setPosition(point.beam.pan, point.beam.tilt);
+      beam.setDimmer(point.beam.dimmer ?? 255);
+      beam.setFocus(point.beam.focus ?? 128);
       console.log(`[gallery] point ${n}: revealed (${point.color})`);
       break;
     case 'beamFade':
@@ -252,26 +254,45 @@ function advance() {
   }
 }
 
-// Global play/pause. Pausing freezes the timeline (tick() becomes a no-op)
-// and pauses whichever hplayer is currently playing; resuming shifts
-// `stepStart` forward by the paused duration — so the in-progress step picks
-// up exactly where it left off — and resumes that same hplayer.
+// Global play/pause. Pausing freezes the timeline (tick() becomes a no-op,
+// checked first thing every tick — nothing below it runs, including the
+// video/sound timers and the video.seconds stop-check, so a step's own
+// clock genuinely stops advancing, not just visually) and pauses whichever
+// hplayer is currently playing; resuming shifts `stepStart` forward by the
+// paused duration — so the in-progress step picks up exactly where it left
+// off (verified: pausing mid-video and resuming minutes later does not
+// make the 'video' step's video.seconds stop-check or its advance() fire
+// early) — and resumes that same hplayer.
+//
+// hplayer.pause()/.resume() are best-effort network calls to hardware this
+// app doesn't otherwise poll — if one fails, our own timeline still freezes
+// correctly, but the physical player may keep playing (or stay paused)
+// out of sync with what the UI shows. Surfaced back to the caller as
+// `hplayerOk: false` so /api/pause can flag it rather than stay silent.
 async function setPaused(next) {
-  if (next === paused) return;
+  if (next === paused) return true;
   const hplayer = activeHplayer();
+  let hplayerOk = true;
   if (next) {
     paused = true;
     pausedAt = Date.now();
-    if (hplayer) await hplayer.pause().catch((err) =>
-      console.error(`[gallery] pause on ${hplayer.host} failed: ${err.message}`));
+    if (hplayer) await hplayer.pause().catch((err) => {
+      hplayerOk = false;
+      console.error(`[gallery] pause on ${hplayer.host} failed: ${err.message} ` +
+        `— timeline is frozen but the player itself may keep playing`);
+    });
     console.log('[gallery] paused');
   } else {
     stepStart += Date.now() - pausedAt;
     paused = false;
-    if (hplayer) await hplayer.resume().catch((err) =>
-      console.error(`[gallery] resume on ${hplayer.host} failed: ${err.message}`));
+    if (hplayer) await hplayer.resume().catch((err) => {
+      hplayerOk = false;
+      console.error(`[gallery] resume on ${hplayer.host} failed: ${err.message} ` +
+        `— timeline resumed but the player itself may still be paused`);
+    });
     console.log('[gallery] resumed');
   }
+  return hplayerOk;
 }
 
 function tick() {
@@ -300,7 +321,7 @@ function tick() {
       pos.pan += (wander.pan - pos.pan) * 0.07;
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
-      beam.setDimmer(255);
+      beam.setDimmer(point.beam.dimmer ?? 255);
       if (t >= dur) advance();
       break;
     }
@@ -309,8 +330,8 @@ function tick() {
       const k = Math.min(1, t / dur);
       const ease = 1 - (1 - k) ** 3;
       const wobble = Math.sin(k * Math.PI * 4) * (1 - k) * 8;
-      pos.pan = focusFrom.pan + (point.pan - focusFrom.pan) * ease + wobble;
-      pos.tilt = focusFrom.tilt + (point.tilt - focusFrom.tilt) * ease + wobble * 0.4;
+      pos.pan = focusFrom.pan + (point.beam.pan - focusFrom.pan) * ease + wobble;
+      pos.tilt = focusFrom.tilt + (point.beam.tilt - focusFrom.tilt) * ease + wobble * 0.4;
       beam.setPosition(pos.pan, pos.tilt);
       if (k >= 1) advance();
       break;
@@ -432,10 +453,12 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/pause  { paused: boolean } — freezes/resumes the whole
     // timeline and pauses/resumes whichever hplayer is currently playing.
-    // Not persisted: always starts playing on process restart.
+    // Not persisted: always starts playing on process restart. `hplayerOk:
+    // false` in the response means the timeline froze/resumed fine but the
+    // network call to the hplayer itself failed — it may be out of sync.
     if (req.url === '/api/pause') {
-      await setPaused(!!body.paused);
-      return sendJson(200, { ok: true });
+      const hplayerOk = await setPaused(!!body.paused);
+      return sendJson(200, { ok: true, hplayerOk });
     }
 
     // POST /api/focus  { point: 0-based index }

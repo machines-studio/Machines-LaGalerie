@@ -61,6 +61,7 @@
   .switch.on::after { transform: translateX(1.5rem); }
   #status { color: #8a8f98; font-size: 0.85rem; }
   .hint { color: #666c78; font-size: 0.78rem; margin-top: 0.6rem; }
+  #pauseWarning { color: #cf8a3a; font-size: 0.8rem; margin-top: 0; }
 </style>
 </head>
 <body>
@@ -68,6 +69,7 @@
 
 <div class="transport">
   <button class="primary" id="pauseBtn">⏸ Pause</button>
+  <span class="hint" id="pauseWarning"></span>
 </div>
 
 <div class="card">
@@ -169,7 +171,10 @@ $('#fogToggle').onclick = async () => {
 
 $('#pauseBtn').onclick = async () => {
   const nowPaused = $('#pauseBtn').classList.contains('paused');
-  await post('/api/pause', { paused: !nowPaused });
+  const res = await post('/api/pause', { paused: !nowPaused });
+  $('#pauseWarning').textContent = (res.ok && res.hplayerOk === false)
+    ? '⚠ player didn\'t confirm — may be out of sync'
+    : '';
   refresh();
 };
 
