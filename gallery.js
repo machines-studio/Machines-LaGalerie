@@ -11,10 +11,10 @@
 //   - one master volume slider, applied to all 3 hplayers at once
 //     (persisted to gallery-state.json, survives a power cycle)
 //   - "goto focus" per point: takeover that cuts whatever is currently
-//     playing and jumps the live show to that point's search step, so it
+//     playing and jumps the live show to that point's disco step, so it
 //     wanders/locks/reveals the requested point the normal way; resumes
 //     normal looping afterwards
-//   - fog machine master on/off (disables the automatic search-phase bursts;
+//   - fog machine master on/off (disables the automatic disco-phase bursts;
 //     persisted to gallery-state.json, survives a power cycle)
 //   - global play/pause: freezes the whole timeline (beam/smoke/strip stop
 //     changing) and pauses whichever hplayer is currently playing (sound
@@ -48,12 +48,6 @@ const timeScale = args.includes('--fast') ? 0.3 : 1;
 const { fixtures, config, shutdown } = await setup();
 handleExit(shutdown);
 
-if (!args.includes('--skip-hplayer-wait')) await waitForHplayers(fixtures);
-
-// A previous session may have left a player mid-clip (crash, power cut) —
-// reset every hplayer to idle before the show starts driving them again.
-await stopAllHplayers(fixtures);
-
 const show = config.show;
 const beam = fixtures.beam;
 const smokeFixture = fixtures.smoke;
@@ -66,6 +60,43 @@ const allHplayers = points
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rand = (min, max) => min + Math.random() * (max - min);
+
+// --- blink each point's strip while its hplayer(s) are still booting --------
+// So whoever's on site can walk the room and see, strip by strip, which
+// hplayer(s) haven't come up yet — rather than only a host name in a
+// terminal log. A point's strip depends on its own `hplayer` (video) and,
+// if set, `sound.hplayer` (may be a different player, e.g. a shared sound
+// player) — it blinks as long as either one is still pending, and goes dark
+// as soon as both have answered, even before the others finish booting.
+if (!args.includes('--skip-hplayer-wait')) {
+  const stripHplayerNames = points.map((p) => [
+    fixtures[p.strip],
+    new Set([p.hplayer, p.sound?.hplayer].filter(Boolean)),
+  ]);
+  let pending = new Set();
+  let blinkOn = false;
+  const blinkTimer = setInterval(() => {
+    blinkOn = !blinkOn;
+    for (const [strip, names] of stripHplayerNames) {
+      const waiting = [...names].some((name) => pending.has(name));
+      strip.setColor(0, 0, 0, waiting && blinkOn ? 180 : 0);
+    }
+  }, 400);
+
+  await waitForHplayers(fixtures, { onUpdate: (p) => { pending = p; } });
+
+  clearInterval(blinkTimer);
+  for (const [strip] of stripHplayerNames) strip.off();
+}
+
+// A previous session may have left a player mid-clip (crash, power cut) —
+// reset every hplayer to idle before the show starts driving them again.
+await stopAllHplayers(fixtures);
+
+// How long to keep the shutter closed while the color wheel physically
+// rotates to its new band. Real hardware travel time, not part of the show
+// timing — stays constant even under --fast.
+const COLOR_CHANGE_BLINK_MS = 150;
 
 // --- persistent gallery state (survives power loss, not just process restart) --
 // Master volume (applies to every hplayer at once — there is no per-player
@@ -122,13 +153,14 @@ let focusRequest = null; // point index requested via the gallery UI, or null
 let paused = false; // global play/pause, set via the gallery UI, not persisted
 let pausedAt = null; // Date.now() when paused; used to shift stepStart on resume
 let videoStopped = false; // one-shot: has the current 'video' step's hplayer been stopped yet
+let soundStopped = false; // one-shot: has the current 'disco' step's sound hplayer been stopped yet
 
-// Index of the timeline's 'search' step — resolved once so a "goto focus"
+// Index of the timeline's 'disco' step — resolved once so a "goto focus"
 // request can jump straight to it, for the requested point.
-const searchIndex = timeline.findIndex((s) => s.phase === 'search');
-if (searchIndex === -1) throw new Error("show.timeline needs a 'search' step");
+const discoIndex = timeline.findIndex((s) => s.phase === 'disco');
+if (discoIndex === -1) throw new Error("show.timeline needs a 'disco' step");
 
-// Every step in a pass — including 'search' — targets the same current
+// Every step in a pass — including 'disco' — targets the same current
 // point: the beam searches in that point's color, then locks onto and
 // reveals that same point right after.
 function targetPoint(step) {
@@ -137,17 +169,17 @@ function targetPoint(step) {
 
 function stepSeconds(step) {
   if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
-  if (step.phase === 'sound') return points[pointIndex].sound?.seconds ?? 0;
   return step.seconds;
 }
 
 // The hplayer actually producing sound/picture right now, if any — the
-// current point's sound hplayer during 'sound', its own hplayer during
-// 'video'. Used by play/pause to pause/resume the right player.
+// current point's sound hplayer during 'disco' (if it has a sound
+// pre-roll), its own hplayer during 'video'. Used by play/pause to
+// pause/resume the right player.
 function activeHplayer() {
   const step = timeline[stepIndex];
   const point = points[pointIndex];
-  if (step.phase === 'sound' && point.sound) return fixtures[point.sound.hplayer];
+  if (step.phase === 'disco' && point.sound) return fixtures[point.sound.hplayer];
   if (step.phase === 'video' && point.hplayer) return fixtures[point.hplayer];
   return null;
 }
@@ -160,18 +192,43 @@ function enter(index) {
   const n = pointIndex + 1;
 
   switch (step.phase) {
-    case 'search': {
-      beam.shutterOpen();
+    case 'disco': {
+      // Close the shutter for the color change: the wheel has to physically
+      // rotate to the new band, and with the shutter open that rotation
+      // sweeps visibly through every color in between. Closing first turns
+      // it into a quick blink instead.
+      beam.shutterClose();
       beam.setColor(point.color);
+      setTimeout(() => beam.shutterOpen(), COLOR_CHANGE_BLINK_MS);
       beam.setFocus(point.beam.focus ?? 128);
+      beam.setFrost(point.beam.frost ?? false);
       const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
       if (state.smokeEnabled) smokeFixture.burst(step.smokePercent, smokeSec);
+      // Sound pre-roll starts right alongside the search wander and smoke —
+      // all three run together for this step. Points with no `sound` field
+      // just skip this part.
+      soundStopped = false;
+      const sound = point.sound;
+      if (sound) {
+        const hplayer = fixtures[sound.hplayer];
+        hplayer.trig(sound.file)
+          .then(() => hplayer.volume(state.volume)) // in case the player reset its own volume
+          .catch((err) => console.error(`[gallery] ${sound.hplayer} sound trig failed: ${err.message}`));
+      }
       console.log(`[gallery] point ${n}: searching (${point.color})...` +
-        (state.smokeEnabled ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : ''));
+        (state.smokeEnabled ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : '') +
+        (sound ? ` (sound ${sound.file} on ${sound.hplayer})` : ''));
       break;
     }
     case 'focus':
       smokeFixture.off();
+      // In case the sound clip is still going (disco.seconds < sound.seconds,
+      // or it just hasn't hit its own stop-check yet) — don't let it bleed
+      // into focus/reveal.
+      if (point.sound && !soundStopped) {
+        soundStopped = true;
+        fixtures[point.sound.hplayer].stop().catch(() => {});
+      }
       focusFrom = { ...pos };
       console.log(`[gallery] point ${n}: locking onto (pan ${point.beam.pan}°, tilt ${point.beam.tilt}°)`);
       break;
@@ -179,31 +236,16 @@ function enter(index) {
       beam.setPosition(point.beam.pan, point.beam.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
       beam.setFocus(point.beam.focus ?? 128);
+      beam.setFrost(point.beam.frost ?? false);
       console.log(`[gallery] point ${n}: revealed (${point.color})`);
       break;
     case 'beamFade':
       smokeFixture.off();
       console.log(`[gallery] point ${n}: beam fading out`);
       break;
-    case 'sound': {
-      const sound = point.sound;
-      if (sound) {
-        const hplayer = fixtures[sound.hplayer];
-        hplayer.trig(sound.file)
-          .then(() => hplayer.volume(state.volume)) // in case the player reset its own volume
-          .catch((err) => console.error(`[gallery] ${sound.hplayer} sound trig failed: ${err.message}`));
-        console.log(`[gallery] point ${n}: sound ${sound.file} on ${sound.hplayer}`);
-      }
-      break;
-    }
     case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
-      // Sound pre-roll is done holding its 'sound' step — stop it explicitly
-      // rather than letting it keep playing under the video (it may live on
-      // a different hplayer than the point's own).
-      const soundHplayer = point.sound ? fixtures[point.sound.hplayer] : null;
-      if (soundHplayer) soundHplayer.stop().catch(() => {});
       videoStopped = false;
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
@@ -227,7 +269,7 @@ function enter(index) {
 
 function advance() {
   // A focus request takes priority over the normal timeline order: jump
-  // into the requested point's search step, from wherever we are, so the
+  // into the requested point's disco step, from wherever we are, so the
   // beam wanders/locks/reveals it the normal way instead of hard-cutting
   // straight to a black fade-in.
   if (focusRequest !== null) {
@@ -241,7 +283,7 @@ function advance() {
     }
     pointIndex = requested;
     wander = null; // start the wander fresh toward the new point's window
-    enter(searchIndex);
+    enter(discoIndex);
     return;
   }
 
@@ -306,13 +348,13 @@ function tick() {
   // A focus request can also interrupt mid-step, not just at step
   // boundaries — otherwise a 90 s video step would ignore the button for
   // up to 90 s. Only skip if we're not already exactly where it wants us.
-  if (focusRequest !== null && !(stepIndex === searchIndex && pointIndex === focusRequest)) {
+  if (focusRequest !== null && !(stepIndex === discoIndex && pointIndex === focusRequest)) {
     advance();
     return;
   }
 
   switch (step.phase) {
-    case 'search': {
+    case 'disco': {
       const reached = wander && Math.hypot(wander.pan - pos.pan, wander.tilt - pos.tilt) < 5;
       if (!wander || reached || ++wanderAge > config.refreshRate * 1.5) {
         wander = { pan: rand(step.panMin, step.panMax), tilt: rand(step.tiltMin, step.tiltMax) };
@@ -322,6 +364,15 @@ function tick() {
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
+      // Sound only plays for its own sound.seconds — stop it there rather
+      // than leaving it running for the rest of this (possibly longer) step.
+      if (point.sound && !soundStopped) {
+        const soundDur = point.sound.seconds * timeScale;
+        if (t >= soundDur) {
+          soundStopped = true;
+          fixtures[point.sound.hplayer].stop().catch(() => {});
+        }
+      }
       if (t >= dur) advance();
       break;
     }
@@ -346,11 +397,6 @@ function tick() {
       const k = Math.min(1, t / dur);
       beam.setDimmer(Math.round(255 * (1 - k)));
       if (k >= 1) advance();
-      break;
-    }
-
-    case 'sound': {
-      if (t >= dur) advance();
       break;
     }
 

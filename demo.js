@@ -41,6 +41,11 @@ const timeline = show.timeline;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rand = (min, max) => min + Math.random() * (max - min);
 
+// How long to keep the shutter closed while the color wheel physically
+// rotates to its new band. Real hardware travel time, not part of the show
+// timing — stays constant even under --fast.
+const COLOR_CHANGE_BLINK_MS = 150;
+
 // --- startup self-test: quick R/G/B/W wipe on every strip -------------------
 console.log('[show] startup strip check: red / green / blue / white');
 const allStrips = points.map((p) => fixtures[p.strip]);
@@ -64,9 +69,10 @@ let wander = null;                  // current random search target
 let wanderAge = 0;
 let focusFrom = null;               // position when the focus step started
 let videoStopped = false;           // one-shot: has the current 'video' step's hplayer been stopped yet
+let soundStopped = false;           // one-shot: has the current 'disco' step's sound hplayer been stopped yet
 
 // The point whose color/hplayer/strip is "active" for a given step. Every
-// step in a pass — including 'search' — targets the same current point:
+// step in a pass — including 'disco' — targets the same current point:
 // the beam searches in that point's color, then locks onto and reveals
 // that same point right after.
 function targetPoint(step) {
@@ -75,7 +81,6 @@ function targetPoint(step) {
 
 function stepSeconds(step) {
   if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
-  if (step.phase === 'sound') return points[pointIndex].sound?.seconds ?? 0;
   return step.seconds;
 }
 
@@ -87,18 +92,42 @@ function enter(index) {
   const n = pointIndex + 1;
 
   switch (step.phase) {
-    case 'search': {
-      beam.shutterOpen();
+    case 'disco': {
+      // Close the shutter for the color change: the wheel has to physically
+      // rotate to the new band, and with the shutter open that rotation
+      // sweeps visibly through every color in between. Closing first turns
+      // it into a quick blink instead.
+      beam.shutterClose();
       beam.setColor(point.color);
+      setTimeout(() => beam.shutterOpen(), COLOR_CHANGE_BLINK_MS);
       beam.setFocus(point.beam.focus ?? 128);
+      beam.setFrost(point.beam.frost ?? false);
       const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
       if (smoke) smoke.burst(step.smokePercent, smokeSec);
+      // Sound pre-roll starts right alongside the search wander and smoke —
+      // all three run together for this step. Points with no `sound` field
+      // just skip this part.
+      soundStopped = false;
+      const sound = point.sound;
+      if (sound) {
+        const hplayer = fixtures[sound.hplayer];
+        hplayer.trig(sound.file).catch((err) =>
+          console.error(`[show] ${sound.hplayer} sound trig failed: ${err.message}`));
+      }
       console.log(`[show] point ${n}: searching (${point.color})...` +
-        (smoke ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : ''));
+        (smoke ? ` (smoke ${step.smokePercent}% for ${smokeSec.toFixed(1)} s)` : '') +
+        (sound ? ` (sound ${sound.file} on ${sound.hplayer})` : ''));
       break;
     }
     case 'focus':
       if (smoke) smoke.off();
+      // In case the sound clip is still going (disco.seconds < sound.seconds,
+      // or it just hasn't hit its own stop-check yet) — don't let it bleed
+      // into focus/reveal.
+      if (point.sound && !soundStopped) {
+        soundStopped = true;
+        fixtures[point.sound.hplayer].stop().catch(() => {});
+      }
       focusFrom = { ...pos };
       console.log(`[show] point ${n}: locking onto (pan ${point.beam.pan}°, tilt ${point.beam.tilt}°)`);
       break;
@@ -106,29 +135,15 @@ function enter(index) {
       beam.setPosition(point.beam.pan, point.beam.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
       beam.setFocus(point.beam.focus ?? 128);
+      beam.setFrost(point.beam.frost ?? false);
       console.log(`[show] point ${n}: revealed (${point.color})`);
       break;
     case 'beamFade':
       console.log(`[show] point ${n}: beam fading out`);
       break;
-    case 'sound': {
-      const sound = point.sound;
-      if (sound) {
-        const hplayer = fixtures[sound.hplayer];
-        hplayer.trig(sound.file).catch((err) =>
-          console.error(`[show] ${sound.hplayer} sound trig failed: ${err.message}`));
-        console.log(`[show] point ${n}: sound ${sound.file} on ${sound.hplayer}`);
-      }
-      break;
-    }
     case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
-      // Sound pre-roll is done holding its 'sound' step — stop it explicitly
-      // rather than letting it keep playing under the video (it may live on
-      // a different hplayer than the point's own).
-      const soundHplayer = point.sound ? fixtures[point.sound.hplayer] : null;
-      if (soundHplayer) soundHplayer.stop().catch(() => {});
       videoStopped = false;
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
@@ -166,7 +181,7 @@ function tick() {
   const point = targetPoint(step);
 
   switch (step.phase) {
-    case 'search': {
+    case 'disco': {
       const reached = wander && Math.hypot(wander.pan - pos.pan, wander.tilt - pos.tilt) < 5;
       if (!wander || reached || ++wanderAge > config.refreshRate * 1.5) {
         wander = { pan: rand(step.panMin, step.panMax), tilt: rand(step.tiltMin, step.tiltMax) };
@@ -177,6 +192,15 @@ function tick() {
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
+      // Sound only plays for its own sound.seconds — stop it there rather
+      // than leaving it running for the rest of this (possibly longer) step.
+      if (point.sound && !soundStopped) {
+        const soundDur = point.sound.seconds * timeScale;
+        if (t >= soundDur) {
+          soundStopped = true;
+          fixtures[point.sound.hplayer].stop().catch(() => {});
+        }
+      }
       if (t >= dur) advance();
       break;
     }
@@ -201,11 +225,6 @@ function tick() {
       const k = Math.min(1, t / dur);
       beam.setDimmer(Math.round(255 * (1 - k)));
       if (k >= 1) advance();
-      break;
-    }
-
-    case 'sound': {
-      if (t >= dur) advance();
       break;
     }
 

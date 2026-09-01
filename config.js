@@ -86,14 +86,17 @@ export default {
     // (see STRIP_COLORS in src/fixtures/rgbw-strip.js and BEAM_COLORS in
     // src/fixtures/hero-beam-100.js — must be a name valid in both), where
     // and how the beam settles once it locks onto this point, and its video.
-    //   beam     { pan, tilt, dimmer, focus } applied when the 'reveal' step
-    //            locks onto this point (see src/fixtures/hero-beam-100.js).
-    //            pan/tilt in degrees (0-540 / 0-250) — where the beam aims.
-    //            dimmer 0-255, defaults to 255 (full) if omitted — brightness
-    //            once revealed. focus 0 (far) - 255 (close), defaults to 128
-    //            (mid) if omitted — sharpness of the beam's edge. Calibrate
-    //            all four on site with the web panel (npm run panel) — aim
-    //            with the sliders, copy the values here.
+    //   beam     { pan, tilt, dimmer, focus, frost } applied when the
+    //            'reveal' step locks onto this point (see
+    //            src/fixtures/hero-beam-100.js). pan/tilt in degrees
+    //            (0-540 / 0-250) — where the beam aims. dimmer 0-255,
+    //            defaults to 255 (full) if omitted — brightness once
+    //            revealed. focus 0 (far) - 255 (close), defaults to 128
+    //            (mid) if omitted — sharpness of the beam's edge. frost
+    //            true/false, defaults to false if omitted — softens the
+    //            beam's edge (frost filter on). Calibrate all five on site
+    //            with the web panel (npm run panel) — aim with the sliders,
+    //            copy the values here.
     //   video    { file, seconds } for the timeline's 'video' step.
     //            `file` is passed straight to hplayer.trig(file) — matches
     //            the N in that player's N_xxxx.mp4 on its SD card (RastaOS
@@ -108,31 +111,33 @@ export default {
     //            the triggered file, it's the single source of truth for
     //            "how long is the video" and drives the 'video' step's hold
     //            time.
-    //   sound    optional pre-roll played on the timeline's 'sound' step,
-    //            right after the beam fades and before the video starts:
-    //            { hplayer, file, seconds }, same shape as `video` above
-    //            (file N -> that player's N_xxxx.mp3/.wav — same N_ numbering
-    //            as video, just a different extension) plus its own
-    //            `hplayer` (may differ from the point's own, e.g. routed to a
-    //            center speaker — remember its file numbers share that
-    //            player's numbering space with any video living there too).
-    //            `seconds` is how long the sound step holds (should match
-    //            that clip's length). Omit the whole field to skip the sound
-    //            step for that point (it becomes an instant no-op).
+    //   sound    optional pre-roll played on the timeline's 'disco' step,
+    //            alongside the search wander and smoke burst (all three
+    //            start together): { hplayer, file, seconds }, same shape as
+    //            `video` above (file N -> that player's N_xxxx.mp3/.wav —
+    //            same N_ numbering as video, just a different extension)
+    //            plus its own `hplayer` (may differ from the point's own,
+    //            e.g. routed to a center speaker — remember its file numbers
+    //            share that player's numbering space with any video living
+    //            there too). `seconds` is how long the clip plays before
+    //            being stopped (should match that clip's length, and fit
+    //            within 'disco's own `seconds`, or it gets cut short when
+    //            'disco' ends anyway). Omit the whole field to skip the
+    //            sound pre-roll for that point.
     points: [
       {
-        strip: 'strip1',
-        hplayer: 'hplayer1',
+        strip: 'strip2',
+        hplayer: 'hplayer2',
         color: 'white',
-        beam: { pan: 270, tilt: 44, dimmer: 255, focus: 255 },
+        beam: { pan: 179, tilt: 71, dimmer: 255, focus: 255, frost: true },
         video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
       },
       {
-        strip: 'strip2',
-        hplayer: 'hplayer2',
+        strip: 'strip1',
+        hplayer: 'hplayer1',
         color: 'red',
-        beam: { pan: 179, tilt: 71, dimmer: 255, focus: 255 },
+        beam: { pan: 451, tilt: 191, dimmer: 255, focus: 255, frost: false },
         // hplayer2 also hosts every point's sound pre-roll (files 2-4 below)
         // — keep this point's video file number (1) distinct from those, or
         // /trig/N is ambiguous between the video and a sound clip.
@@ -143,7 +148,7 @@ export default {
         strip: 'strip3',
         hplayer: 'hplayer3',
         color: 'green',
-        beam: { pan: 88, tilt: 42, dimmer: 255, focus: 255 },
+        beam: { pan: 267, tilt: 190, dimmer: 255, focus: 255, frost: false },
         video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 4, seconds: 8 },
       },
@@ -151,18 +156,22 @@ export default {
 
     // The cue sheet — one full pass, per point, in order:
     timeline: [
-      // 1. beam wanders inside the pan/tilt window below, colored for the
-      //    point about to be found, while the smoke machine runs briefly:
-      //    smoke fires for smokeSeconds then stops on its own (capped by
-      //    this step's `seconds`) — it does not run for the whole step.
+      // 1. "disco": beam wanders inside the pan/tilt window below, colored
+      //    for the point about to be found, while the smoke machine and the
+      //    point's sound pre-roll (if any) both run alongside it, all three
+      //    starting together. Smoke fires for smokeSeconds then stops on its
+      //    own (capped by this step's `seconds`) — it does not run for the
+      //    whole step. The sound clip similarly gets stopped once its own
+      //    sound.seconds is up (or when this step ends, whichever comes
+      //    first) — points with no `sound` field just skip that part.
       {
-        phase: 'search', seconds: 12,
-        smokePercent: 50, smokeSeconds: 6,
+        phase: 'disco', seconds: 12,
+        smokePercent: 20, smokeSeconds: 3,
         panMin: 0, panMax: 380, tiltMin: 90, tiltMax: 125,
       },
 
-      // 2. smoke stops (if still running), beam converges onto the point's
-      //    pan/tilt (still that point's color).
+      // 2. smoke/sound stop (if still running), beam converges onto the
+      //    point's pan/tilt (still that point's color).
       { phase: 'focus', seconds: 3 },
 
       // 3. beam holds steady on the point before fading out.
@@ -171,12 +180,6 @@ export default {
       // 4. beam fades to black. Only once this completes do the strip and
       //    hplayer start (sequential, no overlap).
       { phase: 'beamFade', seconds: 2 },
-
-      // 4b. sound pre-roll: if the current point has a `sound` field, trig
-      //     that clip on its hplayer and hold for `sound.seconds` before the
-      //     video starts. Points with no `sound` field skip this step
-      //     instantly (seconds 0).
-      { phase: 'sound' },
 
       // 5. strip fades in (point color) + hplayer trigs points[].video.file,
       //    together. Holds for the point's video length (points[].video.seconds)
