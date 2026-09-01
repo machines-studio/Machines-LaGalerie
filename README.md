@@ -89,12 +89,18 @@ an ordered cue sheet, read top to bottom, replayed once per point in
    "almost found it" wobble), still in that point's color.
 3. **reveal** — the beam holds steady on the point.
 4. **beamFade** — the beam fades to black.
-5. **stripShow** — the point's RGBW strip fades in to the point's color and
-   its hplayer triggers its video, together; holds for the video's own
-   length (`points[].seconds`) plus a shared buffer (`stripShow.extraSeconds`),
-   then fades out.
-6. **gap** — everything off for a beat.
-7. Next point, back to 1 (loops after the last point).
+5. **sound** — optional pre-roll: if the point has a `sound` field
+   (`{ hplayer, file, seconds }` in `points[]`), that hplayer trigs `file`
+   and the step holds for `seconds` before the video starts. A point with
+   no `sound` field skips this step instantly.
+6. **video** — the point's RGBW strip fades in to the point's color and its
+   hplayer triggers `points[].video.file` (defaults to `1` if omitted — only
+   needs setting when a player has more than one clip, e.g. video + a sound
+   file sharing the same hplayer), together; holds for the video's own
+   length (`points[].video.seconds`) plus a shared buffer
+   (`video.extraSeconds`), then fades out.
+7. **gap** — everything off for a beat.
+8. Next point, back to 1 (loops after the last point).
 
 To retime one step, edit its `seconds` in `config.js` — nothing else needs
 touching. To reorder or add a step, edit the `timeline` array; `demo.js`/

@@ -73,7 +73,7 @@ export default {
   //
   // Each step is `{ phase, seconds, ...params }`. `seconds` is that step's
   // own duration — change one number to retime one step, nothing else
-  // needs touching. A step with no `seconds` (stripShow) instead derives
+  // needs touching. A step with no `seconds` (video) instead derives
   // its hold time from the current point (see below).
   // `--fast` (both demo.js and gallery.js) scales every `seconds` by 0.3
   // for quick tests.
@@ -83,18 +83,54 @@ export default {
     // color used for the search/focus/reveal beam AND the strip fade-in
     // (see STRIP_COLORS in src/fixtures/rgbw-strip.js and BEAM_COLORS in
     // src/fixtures/hero-beam-100.js — must be a name valid in both), where
-    // the beam must aim (degrees: pan 0-540, tilt 0-250), and how long that
-    // point's hplayer video runs.
-    //   seconds  the hplayer video's own runtime — keep this matched to the
-    //            actual length of that point's triggered clip, it's the
-    //            single source of truth for "how long is the video" and
-    //            drives the timeline's 'stripShow' step below.
+    // the beam must aim (degrees: pan 0-540, tilt 0-250), and its video.
+    //   video    { file, seconds } for the timeline's 'video' step.
+    //            `file` is passed straight to hplayer.trig(file) — matches
+    //            the N in that player's N_*.mp4; defaults to 1 if omitted,
+    //            so only needs setting when a player has more than one clip
+    //            (e.g. its video AND a sound file living on the same
+    //            hplayer). `seconds` is that clip's own runtime — keep it
+    //            matched to the actual length of the triggered file, it's
+    //            the single source of truth for "how long is the video" and
+    //            drives the 'video' step's hold time.
+    //   sound    optional pre-roll played on the timeline's 'sound' step,
+    //            right after the beam fades and before the video starts:
+    //            { hplayer, file, seconds }, same shape as `video` above
+    //            plus its own `hplayer` (may differ from the point's own,
+    //            e.g. routed to a center speaker). `seconds` is how long the
+    //            sound step holds (should match that clip's length). Omit
+    //            the whole field to skip the sound step for that point (it
+    //            becomes an instant no-op).
     // Calibrate pan/tilt on site with the web panel (npm run panel) — aim
     // with the sliders, copy the values here.
     points: [
-      { strip: 'strip1', hplayer: 'hplayer1', color: 'white', pan: 200, tilt: 60, seconds: 90 },
-      { strip: 'strip2', hplayer: 'hplayer2', color: 'red', pan: 270, tilt: 45, seconds: 90 },
-      { strip: 'strip3', hplayer: 'hplayer3', color: 'green', pan: 340, tilt: 65, seconds: 90 },
+      {
+        strip: 'strip1',
+        hplayer: 'hplayer1',
+        color: 'white',
+        pan: 200,
+        tilt: 60,
+        video: { file: 1, seconds: 90 },
+        sound: { hplayer: 'hplayer2', file: 1, seconds: 8 },
+      },
+      {
+        strip: 'strip2',
+        hplayer: 'hplayer2',
+        color: 'red',
+        pan: 270,
+        tilt: 45,
+        video: { file: 1, seconds: 90 },
+        sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
+      },
+      {
+        strip: 'strip3',
+        hplayer: 'hplayer3',
+        color: 'green',
+        pan: 340,
+        tilt: 65,
+        video: { file: 1, seconds: 90 },
+        sound: { hplayer: 'hplayer2', file: 3, seconds: 8 },
+      },
     ],
 
     // The cue sheet — one full pass, per point, in order:
@@ -120,11 +156,18 @@ export default {
       //    hplayer start (sequential, no overlap).
       { phase: 'beamFade', seconds: 2 },
 
-      // 5. strip fades in (point color) + hplayer trig fires, together.
-      //    Holds for the point's video length (points[].seconds) plus this
-      //    artist-tunable buffer, then the strip fades out. No `seconds`
-      //    here on purpose — total hold time is points[].seconds + extraSeconds.
-      { phase: 'stripShow', extraSeconds: 5 },
+      // 4b. sound pre-roll: if the current point has a `sound` field, trig
+      //     that clip on its hplayer and hold for `sound.seconds` before the
+      //     video starts. Points with no `sound` field skip this step
+      //     instantly (seconds 0).
+      { phase: 'sound' },
+
+      // 5. strip fades in (point color) + hplayer trigs points[].video.file,
+      //    together. Holds for the point's video length (points[].video.seconds)
+      //    plus this artist-tunable buffer, then the strip fades out. No
+      //    `seconds` here on purpose — total hold time is
+      //    points[].video.seconds + extraSeconds.
+      { phase: 'video', extraSeconds: 5 },
 
       // 6. everything off for a beat before the next point begins.
       { phase: 'gap', seconds: 5 },

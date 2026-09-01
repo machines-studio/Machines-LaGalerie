@@ -63,7 +63,8 @@ function targetPoint(step) {
 }
 
 function stepSeconds(step) {
-  if (step.phase === 'stripShow') return points[pointIndex].seconds + step.extraSeconds;
+  if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
+  if (step.phase === 'sound') return points[pointIndex].sound?.seconds ?? 0;
   return step.seconds;
 }
 
@@ -98,16 +99,26 @@ function enter(index) {
     case 'beamFade':
       console.log(`[show] point ${n}: beam fading out`);
       break;
-    case 'stripShow': {
+    case 'sound': {
+      const sound = point.sound;
+      if (sound) {
+        const hplayer = fixtures[sound.hplayer];
+        hplayer.trig(sound.file).catch((err) =>
+          console.error(`[show] ${sound.hplayer} sound trig failed: ${err.message}`));
+        console.log(`[show] point ${n}: sound ${sound.file} on ${sound.hplayer}`);
+      }
+      break;
+    }
+    case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
-        hplayer.trig(1).catch((err) =>
+        hplayer.trig(point.video.file ?? 1).catch((err) =>
           console.error(`[show] ${point.hplayer} trig failed: ${err.message}`));
       }
       console.log(`[show] point ${n}: strip '${point.strip}' fading in (${point.color})` +
-        (hplayer ? ` + ${point.hplayer} trig` : ''));
+        (hplayer ? ` + ${point.hplayer} trig ${point.video.file ?? 1}` : ''));
       break;
     }
     case 'gap':
@@ -175,7 +186,12 @@ function tick() {
       break;
     }
 
-    case 'stripShow': {
+    case 'sound': {
+      if (t >= dur) advance();
+      break;
+    }
+
+    case 'video': {
       const strip = fixtures[point.strip];
       const fadeSeconds = 1.5 * timeScale; // fade in/out edges of the hold
       const k = Math.min(1, t / dur);

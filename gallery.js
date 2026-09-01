@@ -11,7 +11,7 @@
 //   - one master volume slider, applied to all 3 hplayers at once
 //     (persisted to gallery-state.json, survives a power cycle)
 //   - "goto focus" per point: hard-cut takeover, jumps the live show
-//     straight to that point's beamFade -> stripShow (video + strip),
+//     straight to that point's beamFade -> video (video + strip),
 //     resumes normal looping afterwards
 //   - fog machine master on/off (disables the automatic search-phase bursts;
 //     persisted to gallery-state.json, survives a power cycle)
@@ -104,7 +104,7 @@ let wanderAge = 0;
 let focusFrom = null;
 let focusRequest = null; // point index requested via the gallery UI, or null
 
-// Index of the timeline's 'beamFade' and 'stripShow' steps — resolved once
+// Index of the timeline's 'beamFade' and 'video' steps — resolved once
 // so a "goto focus" hard-cut can jump straight to beamFade.
 const beamFadeIndex = timeline.findIndex((s) => s.phase === 'beamFade');
 if (beamFadeIndex === -1) throw new Error("show.timeline needs a 'beamFade' step");
@@ -115,7 +115,8 @@ function targetPoint(step) {
 }
 
 function stepSeconds(step) {
-  if (step.phase === 'stripShow') return points[pointIndex].seconds + step.extraSeconds;
+  if (step.phase === 'video') return points[pointIndex].video.seconds + step.extraSeconds;
+  if (step.phase === 'sound') return points[pointIndex].sound?.seconds ?? 0;
   return step.seconds;
 }
 
@@ -151,17 +152,28 @@ function enter(index) {
       smokeFixture.off();
       console.log(`[gallery] point ${n}: beam fading out`);
       break;
-    case 'stripShow': {
+    case 'sound': {
+      const sound = point.sound;
+      if (sound) {
+        const hplayer = fixtures[sound.hplayer];
+        hplayer.trig(sound.file)
+          .then(() => hplayer.volume(state.volume)) // in case the player reset its own volume
+          .catch((err) => console.error(`[gallery] ${sound.hplayer} sound trig failed: ${err.message}`));
+        console.log(`[gallery] point ${n}: sound ${sound.file} on ${sound.hplayer}`);
+      }
+      break;
+    }
+    case 'video': {
       beam.shutterClose();
       beam.setDimmer(0);
       const hplayer = point.hplayer ? fixtures[point.hplayer] : null;
       if (hplayer) {
-        hplayer.trig(1)
+        hplayer.trig(point.video.file ?? 1)
           .then(() => hplayer.volume(state.volume)) // in case the player reset its own volume
           .catch((err) => console.error(`[gallery] ${point.hplayer} trig failed: ${err.message}`));
       }
       console.log(`[gallery] point ${n}: strip '${point.strip}' fading in (${point.color})` +
-        (hplayer ? ` + ${point.hplayer} trig` : ''));
+        (hplayer ? ` + ${point.hplayer} trig ${point.video.file ?? 1}` : ''));
       break;
     }
     case 'gap':
@@ -183,6 +195,8 @@ function advance() {
     for (const p of points) {
       const hplayer = p.hplayer ? fixtures[p.hplayer] : null;
       if (hplayer) hplayer.stop().catch(() => {});
+      const soundHplayer = p.sound ? fixtures[p.sound.hplayer] : null;
+      if (soundHplayer) soundHplayer.stop().catch(() => {});
     }
     beam.setDimmer(0);
     pointIndex = requested;
@@ -206,7 +220,7 @@ function tick() {
   const point = targetPoint(step);
 
   // A focus request can also interrupt mid-step, not just at step
-  // boundaries — otherwise a 90 s stripShow would ignore the button for
+  // boundaries — otherwise a 90 s video step would ignore the button for
   // up to 90 s. Only skip if we're not already exactly where it wants us.
   if (focusRequest !== null && !(stepIndex === beamFadeIndex && pointIndex === focusRequest)) {
     advance();
@@ -251,7 +265,12 @@ function tick() {
       break;
     }
 
-    case 'stripShow': {
+    case 'sound': {
+      if (t >= dur) advance();
+      break;
+    }
+
+    case 'video': {
       const strip = fixtures[point.strip];
       const fadeSeconds = 1.5 * timeScale;
       const k = Math.min(1, t / dur);
