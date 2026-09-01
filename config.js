@@ -85,7 +85,15 @@ export default {
     // color used for the search/focus/reveal beam AND the strip fade-in
     // (see STRIP_COLORS in src/fixtures/rgbw-strip.js and BEAM_COLORS in
     // src/fixtures/hero-beam-100.js — must be a name valid in both), where
-    // the beam must aim (degrees: pan 0-540, tilt 0-250), and its video.
+    // and how the beam settles once it locks onto this point, and its video.
+    //   beam     { pan, tilt, dimmer, focus } applied when the 'reveal' step
+    //            locks onto this point (see src/fixtures/hero-beam-100.js).
+    //            pan/tilt in degrees (0-540 / 0-250) — where the beam aims.
+    //            dimmer 0-255, defaults to 255 (full) if omitted — brightness
+    //            once revealed. focus 0 (far) - 255 (close), defaults to 128
+    //            (mid) if omitted — sharpness of the beam's edge. Calibrate
+    //            all four on site with the web panel (npm run panel) — aim
+    //            with the sliders, copy the values here.
     //   video    { file, seconds } for the timeline's 'video' step.
     //            `file` is passed straight to hplayer.trig(file) — matches
     //            the N in that player's N_xxxx.mp4 on its SD card (RastaOS
@@ -111,37 +119,32 @@ export default {
     //            `seconds` is how long the sound step holds (should match
     //            that clip's length). Omit the whole field to skip the sound
     //            step for that point (it becomes an instant no-op).
-    // Calibrate pan/tilt on site with the web panel (npm run panel) — aim
-    // with the sliders, copy the values here.
     points: [
       {
         strip: 'strip1',
         hplayer: 'hplayer1',
         color: 'white',
-        pan: 270,
-        tilt: 44,
-        video: { file: 1, seconds: 90 },
+        beam: { pan: 270, tilt: 44, dimmer: 255, focus: 128 },
+        video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
       },
       {
         strip: 'strip2',
         hplayer: 'hplayer2',
         color: 'red',
-        pan: 179,
-        tilt: 71,
+        beam: { pan: 179, tilt: 71, dimmer: 255, focus: 128 },
         // hplayer2 also hosts every point's sound pre-roll (files 2-4 below)
         // — keep this point's video file number (1) distinct from those, or
         // /trig/N is ambiguous between the video and a sound clip.
-        video: { file: 1, seconds: 90 },
+        video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 3, seconds: 8 },
       },
       {
         strip: 'strip3',
         hplayer: 'hplayer3',
         color: 'green',
-        pan: 88,
-        tilt: 42,
-        video: { file: 1, seconds: 90 },
+        beam: { pan: 88, tilt: 42, dimmer: 255, focus: 128 },
+        video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 4, seconds: 8 },
       },
     ],

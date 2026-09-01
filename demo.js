@@ -90,6 +90,7 @@ function enter(index) {
     case 'search': {
       beam.shutterOpen();
       beam.setColor(point.color);
+      beam.setFocus(point.beam.focus ?? 128);
       const smokeSec = Math.min(step.smokeSeconds, step.seconds) * timeScale;
       if (smoke) smoke.burst(step.smokePercent, smokeSec);
       console.log(`[show] point ${n}: searching (${point.color})...` +
@@ -99,11 +100,12 @@ function enter(index) {
     case 'focus':
       if (smoke) smoke.off();
       focusFrom = { ...pos };
-      console.log(`[show] point ${n}: locking onto (pan ${point.pan}°, tilt ${point.tilt}°)`);
+      console.log(`[show] point ${n}: locking onto (pan ${point.beam.pan}°, tilt ${point.beam.tilt}°)`);
       break;
     case 'reveal':
-      beam.setPosition(point.pan, point.tilt);
-      beam.setDimmer(255);
+      beam.setPosition(point.beam.pan, point.beam.tilt);
+      beam.setDimmer(point.beam.dimmer ?? 255);
+      beam.setFocus(point.beam.focus ?? 128);
       console.log(`[show] point ${n}: revealed (${point.color})`);
       break;
     case 'beamFade':
@@ -174,7 +176,7 @@ function tick() {
       pos.pan += (wander.pan - pos.pan) * 0.07;
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
-      beam.setDimmer(255);
+      beam.setDimmer(point.beam.dimmer ?? 255);
       if (t >= dur) advance();
       break;
     }
@@ -183,8 +185,8 @@ function tick() {
       const k = Math.min(1, t / dur);
       const ease = 1 - (1 - k) ** 3; // cubic ease-out
       const wobble = Math.sin(k * Math.PI * 4) * (1 - k) * 8; // decaying "almost got it" oscillation
-      pos.pan = focusFrom.pan + (point.pan - focusFrom.pan) * ease + wobble;
-      pos.tilt = focusFrom.tilt + (point.tilt - focusFrom.tilt) * ease + wobble * 0.4;
+      pos.pan = focusFrom.pan + (point.beam.pan - focusFrom.pan) * ease + wobble;
+      pos.tilt = focusFrom.tilt + (point.beam.tilt - focusFrom.tilt) * ease + wobble * 0.4;
       beam.setPosition(pos.pan, pos.tilt);
       if (k >= 1) advance();
       break;
