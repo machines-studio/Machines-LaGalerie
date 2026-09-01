@@ -40,9 +40,14 @@ export async function setup() {
       : `[net] ${name} (${def.type}) at http://${def.host}:${def.port ?? 8080}`);
   }
 
-  // Blackout, give the last frame time to go out on the wire, then close.
+  // Blackout every DMX fixture (strip + beam — zeroing the whole frame turns
+  // the strips off and closes the beam's shutter/dimmer), stop every hplayer
+  // (not DMX, so blackout() doesn't reach them — otherwise a player left
+  // mid-clip would keep playing/looping after the app exits), give the last
+  // DMX frame time to go out on the wire, then close.
   const shutdown = async () => {
     dmx.blackout();
+    await stopAllHplayers(fixtures);
     await new Promise((resolve) => setTimeout(resolve, 3 * dmx.frameInterval));
     await dmx.close();
   };
@@ -94,11 +99,13 @@ export async function waitForHplayers(fixtures, { intervalMs = 2000 } = {}) {
 }
 
 /**
- * Stop every hplayer fixture (back to its idle loop), best-effort. Meant to
- * run once at startup — a previous session that didn't shut down cleanly
- * (crash, power cut) can leave a player mid-clip; without this it would sit
+ * Stop every hplayer fixture (back to its idle loop), best-effort. Called
+ * both at startup (a previous session that didn't shut down cleanly —
+ * crash, power cut — can leave a player mid-clip; without this it would sit
  * there playing/looping that stale clip until the timeline happens to
- * trig/stop it again.
+ * trig/stop it again) and from shutdown() (see setup()) so a clean exit
+ * doesn't leave a player running after the app quits — dmx.blackout() only
+ * reaches the DMX fixtures, hplayers are separate network devices.
  *
  * @param {object} fixtures  the `fixtures` map returned by setup()
  */
@@ -106,16 +113,19 @@ export async function stopAllHplayers(fixtures) {
   const players = Object.entries(fixtures).filter(([, f]) => f instanceof HPlayer);
   await Promise.all(players.map(([name, hplayer]) =>
     hplayer.stop().catch((err) =>
-      console.error(`[boot] stop on ${name} (${hplayer.host}) failed: ${err.message}`))));
+      console.error(`[hplayer] stop on ${name} (${hplayer.host}) failed: ${err.message}`))));
 }
 
-/** Install a Ctrl+C / SIGTERM handler that blacks out before exiting. */
+/**
+ * Install a Ctrl+C / SIGTERM handler that blacks out (DMX fixtures) and
+ * stops every hplayer before exiting — see setup()'s shutdown().
+ */
 export function handleExit(shutdown) {
   let closing = false;
   const onSignal = async () => {
     if (closing) return;
     closing = true;
-    console.log('\n[dmx] blackout & exit');
+    console.log('\n[dmx] blackout, stop hplayers & exit');
     await shutdown();
     process.exit(0);
   };

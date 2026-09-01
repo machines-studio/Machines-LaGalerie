@@ -124,7 +124,7 @@ export default {
         strip: 'strip1',
         hplayer: 'hplayer1',
         color: 'white',
-        beam: { pan: 270, tilt: 44, dimmer: 255, focus: 128 },
+        beam: { pan: 270, tilt: 44, dimmer: 255, focus: 255 },
         video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 2, seconds: 8 },
       },
@@ -132,7 +132,7 @@ export default {
         strip: 'strip2',
         hplayer: 'hplayer2',
         color: 'red',
-        beam: { pan: 179, tilt: 71, dimmer: 255, focus: 128 },
+        beam: { pan: 179, tilt: 71, dimmer: 255, focus: 255 },
         // hplayer2 also hosts every point's sound pre-roll (files 2-4 below)
         // — keep this point's video file number (1) distinct from those, or
         // /trig/N is ambiguous between the video and a sound clip.
@@ -143,7 +143,7 @@ export default {
         strip: 'strip3',
         hplayer: 'hplayer3',
         color: 'green',
-        beam: { pan: 88, tilt: 42, dimmer: 255, focus: 128 },
+        beam: { pan: 88, tilt: 42, dimmer: 255, focus: 255 },
         video: { file: 1, seconds: 9 },
         sound: { hplayer: 'hplayer2', file: 4, seconds: 8 },
       },
