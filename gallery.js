@@ -162,6 +162,14 @@ let pausedAt = null; // Date.now() when paused; used to shift stepStart on resum
 let videoStarted = false; // one-shot: has the current 'video' step's hplayer been trig'd yet
 let videoStopped = false; // one-shot: has the current 'video' step's hplayer been stopped yet
 let soundStopped = false; // one-shot: has the current 'disco' step's sound hplayer been stopped yet
+// When the current point's sound pre-roll was trig'd (Date.now(), 'disco'
+// step entry) — kept separate from stepStart because focusLeadSeconds can
+// move on to 'focus'/'reveal'/'beamFade' while the sound is still playing;
+// this is what those later steps check the sound's real elapsed time
+// against, so it always plays out its own sound.seconds regardless of which
+// timeline step is current. Shifted forward alongside stepStart on
+// pause/resume (see setPaused()) so a pause doesn't cost the sound any time.
+let soundStart = null;
 // Held once per full loop, after the last point's own 'gap' and before
 // wrapping back to the first point — see advance()/tick(). Not part of
 // `timeline` (that's per-point), so it's tracked as its own flag rather
@@ -190,12 +198,19 @@ function stepSeconds(step) {
   // 'disco' runs for as long as the point's sound pre-roll does, not a
   // fixed duration — so the search wander/smoke/sound all naturally end
   // together. Points with no `sound` field fall back to this step's own
-  // `seconds` (there's no clip length to follow). The gallery UI's disco
-  // speedup (state.discoSpeedupSeconds), when set, overrides that with a
-  // fixed X instead — see POST /api/disco-speedup below.
+  // `seconds` (there's no clip length to follow). focusLeadSeconds then
+  // trims that short so 'focus' (beam converging) starts before the sound
+  // actually ends, instead of only after — the sound itself keeps playing
+  // until its own sound.seconds and gets cut short only if 'focus' is
+  // still running when it does (see the 'focus' case in enter()). The
+  // gallery UI's disco speedup (state.discoSpeedupSeconds), when set,
+  // overrides all of that with a fixed X instead — see POST
+  // /api/disco-speedup below; the operator's X already says exactly when
+  // disco ends, so focusLeadSeconds does not also apply on top of it.
   if (step.phase === 'disco') {
     if (state.discoSpeedupSeconds != null) return state.discoSpeedupSeconds;
-    return points[pointIndex].sound?.seconds ?? step.seconds;
+    const base = points[pointIndex].sound?.seconds ?? step.seconds;
+    return Math.max(0, base - (step.focusLeadSeconds ?? 0));
   }
   return step.seconds;
 }
@@ -208,7 +223,11 @@ function activeHplayer() {
   if (inLoopGap) return null; // everything already off, nothing to pause/resume
   const step = timeline[stepIndex];
   const point = points[pointIndex];
-  if (step.phase === 'disco' && point.sound) return fixtures[point.sound.hplayer];
+  // The sound pre-roll can still be playing past 'disco' itself — see
+  // soundStart/checkSoundStop() in tick() — so it's still "active" through
+  // 'focus'/'reveal'/'beamFade' too, as long as it hasn't been stopped yet.
+  const soundPhases = ['disco', 'focus', 'reveal', 'beamFade'];
+  if (soundPhases.includes(step.phase) && point.sound && !soundStopped) return fixtures[point.sound.hplayer];
   // Only once the hplayer has actually been trig'd (see tick()'s 'video'
   // case) — during the pre-video startDelaySeconds window it's still idle,
   // nothing to pause/resume yet.
@@ -239,6 +258,7 @@ function enter(index) {
       // all three run together for this step. Points with no `sound` field
       // just skip this part.
       soundStopped = false;
+      soundStart = Date.now();
       const sound = point.sound;
       if (sound) {
         const hplayer = fixtures[sound.hplayer];
@@ -253,13 +273,12 @@ function enter(index) {
     }
     case 'focus':
       smokeFixture.off();
-      // In case the sound clip is still going (disco.seconds < sound.seconds,
-      // or it just hasn't hit its own stop-check yet) — don't let it bleed
-      // into focus/reveal.
-      if (point.sound && !soundStopped) {
-        soundStopped = true;
-        fixtures[point.sound.hplayer].stop().catch(() => {});
-      }
+      // The sound pre-roll is deliberately NOT stopped here: focusLeadSeconds
+      // routinely moves on to 'focus' before the sound's own sound.seconds
+      // has elapsed, and the sound should keep playing to its full length
+      // regardless of which timeline step the beam has moved on to — see the
+      // soundStart-based stop check in tick() below, which stops it the
+      // instant it actually finishes, whichever step that falls in.
       // Frost only kicks in once the beam is locking onto the point, not
       // during the open search wander.
       beam.setFrost(point.beam.frost ?? false);
@@ -376,7 +395,9 @@ async function setPaused(next) {
     });
     console.log('[gallery] paused');
   } else {
-    stepStart += Date.now() - pausedAt;
+    const pausedMs = Date.now() - pausedAt;
+    stepStart += pausedMs;
+    if (soundStart !== null) soundStart += pausedMs; // keep sound-elapsed math in sync, see checkSoundStop()
     paused = false;
     if (hplayer) await hplayer.resume().catch((err) => {
       hplayerOk = false;
@@ -415,6 +436,25 @@ function tick() {
   const dur = stepSeconds(step) * timeScale;
   const point = targetPoint(step);
 
+  // The sound pre-roll's own stop point is point.sound.seconds after it was
+  // trig'd (soundStart) — independent of `dur`/`t` above, which track the
+  // *current* timeline step and can be shorter (focusLeadSeconds moves on to
+  // 'focus' while the sound is still playing) or on a completely different
+  // step by the time the sound actually ends. Call this once per tick from
+  // every step the sound might still be bleeding into ('disco' through
+  // 'beamFade') so it always plays out its full length and is stopped the
+  // instant it does, whichever step that falls in. The gallery UI's disco
+  // speedup, when set, overrides sound.seconds with the same fixed X used
+  // for `dur` (see stepSeconds()).
+  function checkSoundStop() {
+    if (!point.sound || soundStopped) return;
+    const soundDur = (state.discoSpeedupSeconds ?? point.sound.seconds) * timeScale;
+    if ((Date.now() - soundStart) / 1000 >= soundDur) {
+      soundStopped = true;
+      fixtures[point.sound.hplayer].stop().catch(() => {});
+    }
+  }
+
   switch (step.phase) {
     case 'disco': {
       const reached = wander && Math.hypot(wander.pan - pos.pan, wander.tilt - pos.tilt) < 5;
@@ -426,15 +466,7 @@ function tick() {
       pos.tilt += (wander.tilt - pos.tilt) * 0.07;
       beam.setPosition(pos.pan, pos.tilt);
       beam.setDimmer(point.beam.dimmer ?? 255);
-      // This step's own duration (dur) IS the sound's stop point — either
-      // point.sound.seconds normally, or the gallery UI's disco speedup
-      // when set (see stepSeconds()) — so this fires right as the step
-      // ends. A safety net in case a tick lands slightly late, not a
-      // separate shorter cutoff.
-      if (point.sound && !soundStopped && t >= dur) {
-        soundStopped = true;
-        fixtures[point.sound.hplayer].stop().catch(() => {});
-      }
+      checkSoundStop();
       if (t >= dur) advance();
       break;
     }
@@ -446,16 +478,19 @@ function tick() {
       pos.pan = focusFrom.pan + (point.beam.pan - focusFrom.pan) * ease + wobble;
       pos.tilt = focusFrom.tilt + (point.beam.tilt - focusFrom.tilt) * ease + wobble * 0.4;
       beam.setPosition(pos.pan, pos.tilt);
+      checkSoundStop();
       if (k >= 1) advance();
       break;
     }
 
     case 'reveal': {
+      checkSoundStop();
       if (t >= dur) advance();
       break;
     }
 
     case 'beamFade': {
+      checkSoundStop();
       const k = Math.min(1, t / dur);
       beam.setDimmer(Math.round(255 * (1 - k)));
       if (k >= 1) advance();

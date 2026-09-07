@@ -133,7 +133,7 @@ export default {
         strip: 'strip2',
         hplayer: 'hplayer2',
         color: 'white',
-        beam: { pan: 180, tilt: 125, dimmer: 255, focus: 255, frost: false },
+        beam: { pan: 180, tilt: 152, dimmer: 255, focus: 162, frost: false },
         video: { file: 1, seconds: 726 },
         sound: { hplayer: 'hplayer2', file: 2, seconds: 73 },
       },
@@ -141,7 +141,7 @@ export default {
         strip: 'strip1',
         hplayer: 'hplayer1',
         color: 'red',
-        beam: { pan: 271, tilt: 60, dimmer: 255, focus: 144, frost: false },
+        beam: { pan: 271, tilt: 59, dimmer: 255, focus: 255, frost: false },
         // hplayer2 also hosts every point's sound pre-roll (files 2-4 below)
         // — keep this point's video file number (1) distinct from those, or
         // /trig/N is ambiguous between the video and a sound clip.
@@ -152,7 +152,7 @@ export default {
         strip: 'strip3',
         hplayer: 'hplayer3',
         color: 'green',
-        beam: { pan: 88, tilt: 59, dimmer: 255, focus: 0, frost: false },
+        beam: { pan: 267, tilt: 196, dimmer: 255, focus: 255, frost: false },
         video: { file: 1, seconds: 1236 },
         sound: { hplayer: 'hplayer2', file: 4, seconds: 66 },
       },
@@ -167,9 +167,14 @@ export default {
       //    sound.seconds when it has a sound pre-roll — `seconds` below is
       //    only the fallback for points with none. Smoke fires for
       //    smokeSeconds then stops on its own — it does not run for the
-      //    whole step.
+      //    whole step. focusLeadSeconds trims that hold time short by this
+      //    many seconds, so the 'focus' step (beam converging onto the
+      //    point) starts before the sound/wander would otherwise finish —
+      //    the sound itself is unaffected here, it still plays to its own
+      //    sound.seconds and only gets cut early if 'focus' is still
+      //    running when it ends. 0/omitted = no change from sound.seconds.
       {
-        phase: 'disco', seconds: 12,
+        phase: 'disco', seconds: 12, focusLeadSeconds: 5,
         smokePercent: 5, smokeSeconds: 15,
         panMin: 0, panMax: 380, tiltMin: 90, tiltMax: 125,
       },
